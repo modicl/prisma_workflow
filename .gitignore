@@ -1,0 +1,10 @@
+
+venv/
+.claude/
+.env
+
+docs/
+docs_test/
+
+*.pdf
+*.docx
