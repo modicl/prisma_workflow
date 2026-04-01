@@ -93,7 +93,11 @@ Define EXACTAMENTE 4 niveles con descriptores observables y concretos:
 
 Si recibes retroalimentación (indicada con "RETROALIMENTACIÓN EVALUADOR"), \
 incorpora explícitamente cada sugerencia y agrega al final una sección \
-"CAMBIOS REALIZADOS" indicando qué modificaste y por qué."""
+"CAMBIOS REALIZADOS" indicando qué modificaste y por qué.
+
+REGLA CRÍTICA: NO incluyas saludos, introducciones, despedidas ni comentarios \
+conversacionales (ej. '¡Claro!', 'Espero que esta rúbrica sea útil...'). \
+Entrega EXCLUSIVAMENTE la rúbrica con las secciones solicitadas y nada más."""
 
 generador_rubrica_agent = LlmAgent(
     name="GeneradorRubrica",

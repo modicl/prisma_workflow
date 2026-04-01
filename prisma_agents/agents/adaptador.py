@@ -87,7 +87,11 @@ Indica explícitamente el tipo de adecuación para cada modificación:
   del curso se reemplaza y cuál es el OA adaptado
 
 El material adaptado debe ser directamente usable por el docente de aula. \
-Mantén la estructura del material original pero con todas las modificaciones señaladas."""
+Mantén la estructura del material original pero con todas las modificaciones señaladas.
+
+REGLA CRÍTICA: NO incluyas saludos, introducciones, ni comentarios conversacionales \
+(ej. '¡Absolutamente!', 'Procederé a adaptar...', 'A continuación presento...'). \
+Entrega EXCLUSIVAMENTE el material educativo adaptado y nada más."""
 
 adaptador_agent = LlmAgent(
     name="Adaptador",

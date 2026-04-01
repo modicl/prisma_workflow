@@ -96,7 +96,11 @@ Analiza el documento y extrae la siguiente información:
 - Criterios diferenciados de evaluación
 
 Presenta el análisis usando exactamente estos encabezados. Sé específico y detallado, \
-ya que este perfil será utilizado por otros agentes para adaptar materiales y generar rúbricas."""
+ya que este perfil será utilizado por otros agentes para adaptar materiales y generar rúbricas.
+
+REGLA CRÍTICA: NO incluyas saludos, introducciones, ni comentarios conversacionales \
+(ej. '¡Por supuesto!', 'Aquí tienes el análisis...'). Entrega EXCLUSIVAMENTE el \
+contenido solicitado usando los encabezados indicados."""
 
 analizador_paci_agent = LlmAgent(
     name="AnalizadorPACI",

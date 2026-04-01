@@ -18,13 +18,15 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 from google.adk.runners import Runner
-from google.adk.sessions import InMemorySessionService
+from google.adk.sessions.database_session_service import DatabaseSessionService
+from google.adk.plugins.logging_plugin import LoggingPlugin
 from google.genai.types import Content, Part
 
 # Importar root_agent y utilidades desde el paquete
 sys.path.insert(0, os.path.dirname(__file__))
 from agent import root_agent
 from utils.document_loader import load_document
+from utils.document_exporter import export_results_to_docx
 
 APP_NAME = "paci_workflow"
 USER_ID = "docente"
@@ -48,8 +50,14 @@ async def run_workflow(paci_path: str, material_path: str, prompt: str = "") -> 
     material_text = load_document(material_path, label="Material Base")
     print("  ✓ Documentos cargados.\n")
 
-    # Configurar sesión con estado inicial
-    session_service = InMemorySessionService()
+    # Configurar sesión con estado inicial en PostgreSQL
+    db_url = os.environ.get("BD_LOGS")
+    if not db_url:
+        raise ValueError("Error: La variable de entorno BD_LOGS no está configurada en el .env")
+        
+    print("[Conectando a base de datos...]")
+    session_service = DatabaseSessionService(db_url=db_url)
+    
     session = await session_service.create_session(
         app_name=APP_NAME,
         user_id=USER_ID,
@@ -64,6 +72,7 @@ async def run_workflow(paci_path: str, material_path: str, prompt: str = "") -> 
         agent=root_agent,
         session_service=session_service,
         app_name=APP_NAME,
+        plugins=[LoggingPlugin()]
     )
 
     # Mensaje inicial para activar el flujo
@@ -104,6 +113,18 @@ async def run_workflow(paci_path: str, material_path: str, prompt: str = "") -> 
     print(results["rubrica_final"] or "(vacío)")
 
     print(f"\n{'='*60}\n")
+
+    # Exportar a DOCX
+    print("[Generando archivo DOCX...]")
+    try:
+        # Generamos un nombre dinámico basado en el documento base para evitar sobreescribir siempre el mismo
+        base_name = os.path.basename(material_path).split('.')[0]
+        output_name = f"rubrica_adaptada_{base_name}.docx"
+        docx_path = export_results_to_docx(results, output_filename=output_name)
+        print(f"  ✓ ¡Documento exportado con éxito y listo para editar!")
+        print(f"  Ruta: {docx_path}\n")
+    except Exception as e:
+        print(f"  x Error al exportar a DOCX: {e}\n")
 
     return results
 
