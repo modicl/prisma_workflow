@@ -93,6 +93,7 @@ async def run_workflow(paci_path: str, material_path: str, prompt: str = "") -> 
     state = final_session.state
 
     results = {
+        "status": state.get("status", "success"),
         "perfil_paci": state.get("perfil_paci", ""),
         "planificacion_adaptada": state.get("planificacion_adaptada", ""),
         "rubrica_final": state.get("rubrica", ""),

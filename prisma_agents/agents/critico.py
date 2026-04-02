@@ -52,12 +52,14 @@ CRITERIOS DE ACEPTABILIDAD:
   6. El lenguaje es accesible (sin jerga clínica excesiva)
 
 ✗ NO ACEPTABLE si presenta CUALQUIERA de:
+  - Menciones a "eximición", "eximir" o "promediar con otras notas" (PROHIBIDO tajantemente por el Art. 5 del Decreto 67).
   - OA generales en lugar de los OA del PACI (con adecuaciones significativas)
   - Ausencia de condiciones de acceso a la evaluación indicadas en el PACI
   - Descriptores vagos, no observables o incoherentes con el diagnóstico
   - Faltan uno o más de los 4 niveles de desempeño
   - Lenguaje o exigencias inapropiadas para el nivel cognitivo/comunicativo del estudiante
   - Descriptores que no pueden traducirse a la escala 1.0–7.0 del D67/2018
+  - Cualquier sugerencia de no evaluar al estudiante. La rúbrica SIEMPRE debe proveer una forma de evaluar, adaptada o alternativa.
 
 ═══════════════════════════════════════════════════════════════
 

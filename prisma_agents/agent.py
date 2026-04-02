@@ -77,6 +77,7 @@ class PaciWorkflowAgent(BaseAgent):
 
             if evaluacion.get("acceptable", False):
                 print(f"\n✓ Rúbrica aprobada en iteración {iteration}.\n")
+                ctx.session.state["status"] = "success"
                 break
 
             if iteration < MAX_ITERATIONS:
@@ -92,6 +93,7 @@ class PaciWorkflowAgent(BaseAgent):
                 print(f"\n✗ Rúbrica rechazada. Reintentando con retroalimentación...\n")
             else:
                 print(f"\n⚠ Máximo de iteraciones alcanzado. Se entrega la última versión generada.\n")
+                ctx.session.state["status"] = "fail"
 
 
 def _parse_critic_json(raw: str) -> dict:
