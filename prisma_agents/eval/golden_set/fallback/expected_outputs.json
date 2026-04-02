@@ -1,0 +1,13 @@
+{
+  "case_id": "fallback",
+  "validated": false,
+  "validator": null,
+  "created_at": "2026-04-01",
+  "note": "Caso genérico de referencia estructural. Usar solo cuando no existe golden case para el NEE específico. Confidence = low.",
+  "outputs": {
+    "perfil_paci": "## 1. Diagnóstico y NEE\nEstudiante con NEE [TIPO]. Clasificación: [permanente/transitoria] según Decreto 170/2010.\n\n## 2. Perfil de Aprendizaje\nFortalezas: [describir]. Dificultades: [describir]. Estilos de aprendizaje: [describir].\n\n## 3. Estrategias de Adecuación\nTipo de adecuación: [Acceso / No Significativa / Significativa]. Estrategias metodológicas: [describir].\n\n## 4. Objetivos de Aprendizaje (OA)\nOA priorizados del PACI: [listar OA modificados o priorizados según tipo de adecuación].\n\n## 5. Consideraciones para la Evaluación\nAdaptaciones de acceso: tiempo extendido, modalidad alternativa de respuesta. No puede ser eximido de ninguna asignatura (D67/2018 Art. 5).",
+    "planificacion_adaptada": "## Planificación Adaptada\n\n[ACCESO] Actividad presentada con apoyo visual y tiempo extendido.\n\n[NO SIGNIFICATIVA] Metodología ajustada: uso de material concreto y pasos simplificados.\n\n[ADECUACIÓN SIGNIFICATIVA] OA graduado: el estudiante identifica [objetivo simplificado] con apoyo del docente.",
+    "rubrica": "## CONDICIONES DE APLICACIÓN\n| Condición | Detalle |\n|---|---|\n| Tiempo | Extendido según PACI |\n| Modalidad de respuesta | Oral o escrita según preferencia |\n| Materiales de apoyo | Permitidos según PACI |\n| Entorno | Adaptado según necesidades |\n\n## RÚBRICA DE EVALUACIÓN\n| Criterio | Logrado | Medianamente Logrado | Por Lograr | No Logrado |\n|---|---|---|---|---|\n| Criterio 1 (OA del PACI) | Realiza la tarea de forma autónoma | Realiza con apoyo puntual | Muestra indicios, requiere apoyo significativo | No evidencia el aprendizaje |\n| Criterio 2 (OA del PACI) | Aplica el concepto correctamente | Aplica con errores menores | Aplica con apoyo constante | No aplica |\n\n## NOTAS PARA EL DOCENTE\nLa calificación debe basarse en los OA del PACI, no en los OA generales del curso (D83/2015 Art. 4). Escala 1.0–7.0 (D67/2018 Art. 8). No eximir al estudiante de la evaluación.",
+    "evaluacion_critica": "{\"acceptable\": true, \"critique\": \"La rúbrica cumple los criterios normativos básicos: 4 niveles de desempeño, condiciones de aplicación, criterios alineados a OA del PACI, sin menciones de eximición.\", \"suggestions\": []}"
+  }
+}
