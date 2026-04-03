@@ -80,17 +80,23 @@ def _load_pdf(path: Path, label: str | None) -> str:
             config={"mime_type": "application/pdf", "display_name": path.name},
         )
 
-    # Paso 2: Invocar a gemini-2.5-flash-lite para que "lea" la imagen del PDF
-    # Se le pasa una instrucción estricta de no omitir campos, vital para formularios PACI y tablas.
-    response = client.models.generate_content(
-        model="gemini-2.5-flash-lite",
-        contents=[
-            uploaded,
-            "Extrae y transcribe el texto completo de este documento, "
-            "manteniendo la estructura de secciones y párrafos. "
-            "No omitas ningún campo ni tabla.",
-        ],
-    )
+    # Paso 2: Invocar a gemini-2.5-flash-lite para que "lea" la imagen del PDF.
+    # El bloque try/finally garantiza que el archivo se elimine de los servidores de Google
+    # incluso si la llamada al modelo falla, evitando retención de PII en la nube.
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.5-flash-lite",
+            contents=[
+                uploaded,
+                "Extrae y transcribe el texto completo de este documento, "
+                "manteniendo la estructura de secciones y párrafos. "
+                "No omitas ningún campo ni tabla.",
+            ],
+        )
+    finally:
+        # Eliminar el archivo subido independientemente del resultado.
+        # Google retiene archivos 48 h si no se borran explícitamente.
+        client.files.delete(uploaded.name)
 
     # Añadimos una cabecera para que cuando el agente ADK lea este megatexto del estado (state)
     # sepa visualmente de qué archivo proviene.
