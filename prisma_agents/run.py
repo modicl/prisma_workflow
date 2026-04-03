@@ -10,9 +10,12 @@ Ejemplos:
 """
 
 import asyncio
+import json
 import sys
 import os
 import uuid
+from datetime import datetime
+from pathlib import Path
 from dotenv import load_dotenv
 
 # Carga .env desde la carpeta del script
@@ -28,6 +31,25 @@ sys.path.insert(0, os.path.dirname(__file__))
 from agent import root_agent
 from utils.document_loader import load_document
 from utils.document_exporter import export_results_to_docx
+from utils.token_tracker import SessionTokenUsage
+
+TOKEN_REPORTS_DIR = Path(__file__).parent / "token_reports"
+
+
+def _save_token_report(session_id: str, tracker: SessionTokenUsage, status: str) -> None:
+    """Persiste el reporte de tokens de la sesión en token_reports/."""
+    TOKEN_REPORTS_DIR.mkdir(exist_ok=True)
+    report = {
+        "session_id": session_id,
+        "timestamp": datetime.now().isoformat(),
+        "status": status,
+        "tokens": tracker.to_dict(),
+    }
+    out_path = TOKEN_REPORTS_DIR / f"tokens_{session_id}.json"
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(report, f, ensure_ascii=False, indent=2)
+    if tracker.has_data:
+        print(f"  ✓ Token report: {report['tokens']['total']:,} tokens totales → {out_path.name}")
 
 APP_NAME = "paci_workflow"
 
@@ -87,13 +109,16 @@ async def run_workflow(paci_path: str, material_path: str, prompt: str = "", use
     # Mensaje inicial para activar el flujo
     mensaje_inicial = prompt if prompt else "Inicia el flujo PACI con los documentos proporcionados."
 
+    tracker = SessionTokenUsage()
+
     async for event in runner.run_async(
         user_id=effective_user_id,
         session_id=session.id,
         new_message=Content(parts=[Part(text=mensaje_inicial)]),
     ):
-        # Los agentes imprimen su progreso en consola vía print()
-        pass
+        # Capturar tokens por agente
+        author = getattr(event, "author", None) or "unknown"
+        tracker.add_event(author, event)
 
     # Recuperar resultados del estado de sesión
     final_session = await session_service.get_session(
@@ -107,6 +132,9 @@ async def run_workflow(paci_path: str, material_path: str, prompt: str = "", use
         "planificacion_adaptada": state.get("planificacion_adaptada", ""),
         "rubrica_final": state.get("rubrica", ""),
     }
+
+    # Persistir reporte de tokens
+    _save_token_report(session.id, tracker, results["status"])
 
     # Imprimir resultados finales
     print(f"\n{'='*60}")
