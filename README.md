@@ -49,6 +49,15 @@ Los agentes tienen conocimiento embebido de:
 
 ---
 
+## Privacidad, Seguridad y Monitoreo
+
+- **Protección de Datos (PII):** Los documentos PDF se eliminan de la API de Google Files inmediatamente tras su descarga, garantizando que el material sensible de los estudiantes no quede almacenado en sistemas externos.
+- **Prevención de Prompt Injection:** Todos los documentos y contenidos alimentados por el usuario quedan restringidos mediante delimitadores XML (`<documento_usuario>`) y contramedidas para mitigar vectores de escape.
+- **Aislamiento Multi-usuario:** Múltiples invocaciones de agentes se separan de manera segura bajo un identificador `user_id` dinámico para correcta trazabilidad.
+- **Dashboard de Consumo de Tokens:** Script analítico (`dashboard.py`) para revisar el histórico del consumo de la API, analizando visualmente promedios, uso por agente, percentiles y detecciones de atipicidades desde vistas SQL en PostgreSQL.
+
+---
+
 ## Requisitos
 
 - Python 3.10+
@@ -108,6 +117,17 @@ python run.py datos/paci_alumno.json datos/texto_historia.pdf
 python run.py datos/paci.pdf datos/planificacion.docx "Foco en comprensión lectora"
 ```
 
+### Dashboard de Consumo de Tokens
+
+Para consultar las métricas de tokens usados por cada agente y detectar consumo excesivo (se prevee usar una API más adelante):
+
+```bash
+python dashboard.py                 # Datos guardados del mes actual
+python dashboard.py --all           # Historial completo guardado en BD
+python dashboard.py --create-views  # Inicializar/resetear vistas SQL de tracking
+python dashboard.py --html          # Exportar informe como un dashboard web local (HTML)
+```
+
 ---
 
 ## Output
@@ -138,13 +158,15 @@ prisma_agents/
 ├── run.py                    # Script de ejecución CLI
 ├── requirements.txt
 ├── .env                      # API Key (no subir a repositorio)
+├── dashboard.py              # Script interactivo de reportes de consumo de tokens API
 ├── agents/
 │   ├── analizador_paci.py    # Agente 1: extrae perfil del PACI
 │   ├── adaptador.py          # Agente 2: adapta el material educativo
 │   ├── generador_rubrica.py  # Agente 3: genera la rúbrica
 │   └── critico.py            # Agente Crítico: evalúa la rúbrica
 └── utils/
-    └── document_loader.py    # Carga PDF, DOCX y JSON a texto
+    ├── document_loader.py    # Carga PDF, DOCX y JSON a texto
+    └── token_tracker.py      # Lógica de rastreo de tokens y uso por agente en el EventLoop
 ```
 
 ---
@@ -153,4 +175,4 @@ prisma_agents/
 
 - El Agente Crítico puede rechazar la rúbrica hasta **3 veces**. En cada rechazo entrega retroalimentación específica al Generador para que la corrija. Si tras 3 intentos no es aprobada, se entrega la última versión generada.
 - Los PDF se procesan mediante la **API de Gemini Files**, lo que requiere conexión a internet y consume cuota de la API Key.
-- El estado de la sesión (perfil, planificación, rúbrica) se mantiene en memoria durante la ejecución y no se persiste entre corridas.
+- El estado de la sesión y el histórico de los tokens de cada agente ahora se manejan con identificadores únicos (`user_id`) permitiendo persistir las ejecuciones multi-docente de forma aislada en la base de datos PostgreSQL.
