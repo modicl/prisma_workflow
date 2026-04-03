@@ -2,16 +2,17 @@
 run.py — Script de ejecución CLI del flujo PACI.
 
 Uso:
-    python run.py <paci_path> <material_path> [prompt_adicional]
+    python run.py <paci_path> <material_path> [prompt_adicional] [user_id]
 
 Ejemplos:
     python run.py datos/paci.json datos/guia_matematicas.docx
-    python run.py datos/paci.pdf datos/planificacion.docx "Foco en comprensión lectora"
+    python run.py datos/paci.pdf datos/planificacion.docx "Foco en comprensión lectora" "docente_42"
 """
 
 import asyncio
 import sys
 import os
+import uuid
 from dotenv import load_dotenv
 
 # Carga .env desde la carpeta del script
@@ -29,17 +30,25 @@ from utils.document_loader import load_document
 from utils.document_exporter import export_results_to_docx
 
 APP_NAME = "paci_workflow"
-USER_ID = "docente"
 
 
-async def run_workflow(paci_path: str, material_path: str, prompt: str = "") -> dict:
-    """Ejecuta el flujo multi-agente PACI y retorna los resultados."""
+async def run_workflow(paci_path: str, material_path: str, prompt: str = "", user_id: str = "") -> dict:
+    """Ejecuta el flujo multi-agente PACI y retorna los resultados.
+
+    Args:
+        user_id: Identificador del docente que inicia el flujo. Lo provee el
+                 frontend al llamar al endpoint. Si se omite se genera un UUID
+                 para uso desde CLI, garantizando aislamiento entre ejecuciones.
+    """
+    # Garantizar aislamiento por sesión: nunca mezclar datos de distintos usuarios.
+    effective_user_id = user_id if user_id else str(uuid.uuid4())
 
     print(f"\n{'='*60}")
     print("  FLUJO MULTI-AGENTE PACI — Iniciando")
     print(f"{'='*60}")
     print(f"  PACI:     {paci_path}")
     print(f"  Material: {material_path}")
+    print(f"  User ID:  {effective_user_id}")
     if prompt:
         print(f"  Prompt:   {prompt}")
     print(f"{'='*60}\n")
@@ -60,7 +69,7 @@ async def run_workflow(paci_path: str, material_path: str, prompt: str = "") -> 
     
     session = await session_service.create_session(
         app_name=APP_NAME,
-        user_id=USER_ID,
+        user_id=effective_user_id,
         state={
             "paci_document": paci_text,
             "material_document": material_text,
@@ -79,7 +88,7 @@ async def run_workflow(paci_path: str, material_path: str, prompt: str = "") -> 
     mensaje_inicial = prompt if prompt else "Inicia el flujo PACI con los documentos proporcionados."
 
     async for event in runner.run_async(
-        user_id=USER_ID,
+        user_id=effective_user_id,
         session_id=session.id,
         new_message=Content(parts=[Part(text=mensaje_inicial)]),
     ):
@@ -88,7 +97,7 @@ async def run_workflow(paci_path: str, material_path: str, prompt: str = "") -> 
 
     # Recuperar resultados del estado de sesión
     final_session = await session_service.get_session(
-        app_name=APP_NAME, user_id=USER_ID, session_id=session.id
+        app_name=APP_NAME, user_id=effective_user_id, session_id=session.id
     )
     state = final_session.state
 
@@ -132,11 +141,13 @@ async def run_workflow(paci_path: str, material_path: str, prompt: str = "") -> 
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        print("Uso: python run.py <paci_path> <material_path> [prompt_adicional]")
+        print("Uso: python run.py <paci_path> <material_path> [prompt_adicional] [user_id]")
         sys.exit(1)
 
     paci_path = sys.argv[1]
     material_path = sys.argv[2]
     prompt_adicional = sys.argv[3] if len(sys.argv) > 3 else ""
+    # Desde CLI el user_id es opcional; si se omite, run_workflow genera un UUID.
+    user_id_arg = sys.argv[4] if len(sys.argv) > 4 else ""
 
-    asyncio.run(run_workflow(paci_path, material_path, prompt_adicional))
+    asyncio.run(run_workflow(paci_path, material_path, prompt_adicional, user_id_arg))
