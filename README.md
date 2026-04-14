@@ -1,4 +1,4 @@
-# Flujo Multi-Agente PACI (Versión alpha)
+# Flujo Multi-Agente PACI (En desarrollo)
 
 Sistema multi-agente para apoyar a docentes del sistema escolar chileno en la generación de **rúbricas de evaluación adaptadas** para estudiantes con Necesidades Educativas Especiales (NEE), a partir del PACI del alumno y el material educativo base.
 
@@ -176,3 +176,9 @@ prisma_agents/
 - El Agente Crítico puede rechazar la rúbrica hasta **3 veces**. En cada rechazo entrega retroalimentación específica al Generador para que la corrija. Si tras 3 intentos no es aprobada, se entrega la última versión generada.
 - Los PDF se procesan mediante la **API de Gemini Files**, lo que requiere conexión a internet y consume cuota de la API Key.
 - El estado de la sesión y el histórico de los tokens de cada agente ahora se manejan con identificadores únicos (`user_id`) permitiendo persistir las ejecuciones multi-docente de forma aislada en la base de datos PostgreSQL.
+
+## Ejemplo de uso
+
+python run.py datos/paci_juan.pdf datos/guia_ciencias.docx "prompt adicional"
+
+El primer archivo es el perfil PACI, el segundo el material base a adaptar y el tercero es un prompt opcional para guiar a los agentes.

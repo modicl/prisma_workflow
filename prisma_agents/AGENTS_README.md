@@ -6,12 +6,21 @@ Sistema multi-agente que procesa documentos PACI (Programa de Adecuación Curric
 
 ## Agentes del pipeline
 
-| Agente | Rol |
-|---|---|
-| **AnalizadorPACI** | Lee el PACI y extrae perfil del estudiante, diagnóstico NEE, OA y estrategias |
-| **Adaptador** | Adapta la planificación base según el perfil DUA, etiquetando cada adecuación |
-| **GeneradorRúbrica** | Genera la rúbrica de evaluación alineada a los OA del PACI |
-| **Crítico** | Revisa la rúbrica y decide si es aceptable o propone correcciones |
+| Agente               | Rol                                                                           |
+| -------------------- | ----------------------------------------------------------------------------- |
+| **AnalizadorPACI**   | Lee el PACI y extrae perfil del estudiante, diagnóstico NEE, OA y estrategias |
+| **Adaptador**        | Adapta la planificación base según el perfil DUA, etiquetando cada adecuación |
+| **GeneradorRúbrica** | Genera la rúbrica de evaluación alineada a los OA del PACI                    |
+| **Crítico**          | Revisa la rúbrica y decide si es aceptable o propone correcciones             |
+
+---
+
+## Seguridad y Monitoreo
+
+Todos los agentes del pipeline incorporan características vitales de protección y observabilidad:
+- **Prevención de Prompt Injection**: Se aíslan los contenidos base (PACI, materiales) en etiquetas `<documento_usuario>` con directivas defensivas estrictas para cada agente.
+- **Protección PII**: Eliminación inmediata de archivos de la API de Google File, evitando que el contenido PII resida durante el análisis.
+- **Seguimiento de Tokens en PostgreSQL**: Se rastrean los gastos de tokens en tiempo real individualizados por cada agente (`event.usage_metadata`), archivándose de manera segura con aislamiento por sesión (usando `user_id`).
 
 ---
 
@@ -22,6 +31,7 @@ El sistema de evaluación (`eval/`) permite medir la calidad de los outputs del 
 ### Tipos de evaluación
 
 #### 1. Compliance checks (deterministas)
+
 Valida estructuralmente los outputs sin usar LLM. Verifica reglas normativas concretas:
 
 - **AnalizadorPACI**: presencia de las 5 secciones requeridas, clasificación de NEE (permanente/transitoria), diagnóstico del Decreto 170, ausencia de eximiciones.
@@ -32,14 +42,15 @@ Valida estructuralmente los outputs sin usar LLM. Verifica reglas normativas con
 Cada agente recibe un score de compliance entre 0 y 1 (checks pasados / total).
 
 #### 2. LLM juez (Gemini)
+
 Evalúa la calidad pedagógica comparando el output contra un **golden set** de referencia. Puntúa en escala 1–5 por dimensiones específicas de cada agente:
 
-| Agente | Dimensiones evaluadas |
-|---|---|
-| AnalizadorPACI | Fidelidad a los OA del PACI, ausencia de alucinaciones |
-| Adaptador | Coherencia NEE↔adaptaciones, aplicación de los 3 pilares DUA |
+| Agente           | Dimensiones evaluadas                                                        |
+| ---------------- | ---------------------------------------------------------------------------- |
+| AnalizadorPACI   | Fidelidad a los OA del PACI, ausencia de alucinaciones                       |
+| Adaptador        | Coherencia NEE↔adaptaciones, aplicación de los 3 pilares DUA                 |
 | GeneradorRúbrica | Alineación OA-PACI, descriptores observables, coherencia con nivel funcional |
-| Crítico | Consistencia de decisión, feedback accionable |
+| Crítico          | Consistencia de decisión, feedback accionable                                |
 
 El juez detecta automáticamente el tipo de NEE del caso (TEA, DI, TEL, Disfasia, TDAH, etc.) a partir del perfil generado por AnalizadorPACI, y carga el golden case correspondiente. Si no existe golden exacto, usa un `fallback` genérico (confianza baja).
 
@@ -47,12 +58,12 @@ El juez detecta automáticamente el tipo de NEE del caso (TEA, DI, TEL, Disfasia
 
 Se calcula como promedio ponderado de compliance y LLM juez por agente:
 
-| Agente | Peso |
-|---|---|
-| GeneradorRúbrica | 40% |
-| Adaptador | 25% |
-| AnalizadorPACI | 20% |
-| Crítico | 15% |
+| Agente           | Peso |
+| ---------------- | ---- |
+| GeneradorRúbrica | 40%  |
+| Adaptador        | 25%  |
+| AnalizadorPACI   | 20%  |
+| Crítico          | 15%  |
 
 **Umbral de aprobación**: score E2E ≥ 0.70 (equivalente a 3.5/5 normalizado).
 
@@ -92,10 +103,11 @@ Los reportes se guardan en `eval/reports/` con timestamp y versión del commit.
 
 ```
 prisma_agents/
+├── dashboard.py          # Dashboard que analiza rendimiento y uso de tokens en DB
 ├── agent.py              # Orquestador principal
 ├── run.py                # Entry point del pipeline
 ├── agents/               # Implementación de cada agente
-├── utils/                # Carga y exportación de documentos
+├── utils/                # Carga de documentos y `token_tracker.py`
 └── eval/
     ├── run_eval.py       # Entry point de evaluación
     ├── compliance_checks.py  # Checks deterministas
@@ -103,3 +115,9 @@ prisma_agents/
     ├── golden_set/       # Casos de referencia por NEE
     └── reports/          # Reportes generados
 ```
+
+## Ejemplo de uso
+
+python run.py datos/paci_juan.pdf datos/guia_ciencias.docx "prompt adicional"
+
+El primer archivo es el perfil PACI, el segundo el material base a adaptar y el tercero es un prompt opcional para guiar a los agentes.

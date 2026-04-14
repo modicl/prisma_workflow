@@ -96,7 +96,7 @@ def _load_pdf(path: Path, label: str | None) -> str:
     finally:
         # Eliminar el archivo subido independientemente del resultado.
         # Google retiene archivos 48 h si no se borran explícitamente.
-        client.files.delete(uploaded.name)
+        client.files.delete(name=uploaded.name)
 
     # Añadimos una cabecera para que cuando el agente ADK lea este megatexto del estado (state)
     # sepa visualmente de qué archivo proviene.
