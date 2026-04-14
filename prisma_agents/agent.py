@@ -19,11 +19,33 @@ from google.adk.agents import BaseAgent
 from google.adk.agents.invocation_context import InvocationContext
 from google.adk.events import Event
 from typing import AsyncGenerator
+from google import genai
 
 from agents.analizador_paci import analizador_paci_agent
 from agents.adaptador import adaptador_agent
 from agents.generador_rubrica import generador_rubrica_agent
 from agents.critico import critico_agent
+
+_CLASSIFY_PROMPT = (
+    "Clasifica si el siguiente mensaje de un docente indica APROBACIÓN o RECHAZO "
+    "del trabajo presentado. Responde únicamente con \"APROBADO\" o \"RECHAZADO\".\n\n"
+    "Mensaje: \"{respuesta}\""
+)
+
+
+def _classify_response(respuesta: str) -> bool:
+    """Usa un LLM para determinar si la respuesta del profesor es aprobación o rechazo.
+
+    Retorna True si es aprobación, False si es rechazo o respuesta inesperada.
+    """
+    client = genai.Client()
+    prompt = _CLASSIFY_PROMPT.format(respuesta=respuesta)
+    response = client.models.generate_content(
+        model="gemini-2.5-flash-lite",
+        contents=prompt,
+    )
+    return response.text.strip().upper() == "APROBADO"
+
 
 MAX_ITERATIONS = 3
 AGENT_TIMEOUT_SECONDS = 90   # segundos por agente antes de considerar timeout
@@ -171,4 +193,6 @@ def _parse_critic_json(raw: str) -> dict:
     }
 
 
-root_agent = PaciWorkflowAgent()
+import os as _os
+if not _os.environ.get("PYTEST_CURRENT_TEST"):
+    root_agent = PaciWorkflowAgent()
