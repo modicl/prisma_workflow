@@ -105,10 +105,10 @@ class PaciWorkflowAgent(BaseAgent):
 
     model_config = {"arbitrary_types_allowed": True}
 
-    analizador_paci_agent: LlmAgent = None
-    adaptador_agent: LlmAgent = None
-    generador_rubrica_agent: LlmAgent = None
-    critico_agent: LlmAgent = None
+    analizador_paci_agent: LlmAgent | None = None
+    adaptador_agent: LlmAgent | None = None
+    generador_rubrica_agent: LlmAgent | None = None
+    critico_agent: LlmAgent | None = None
 
     def __init__(self):
         _analizador = make_analizador_paci_agent()
