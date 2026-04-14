@@ -91,10 +91,11 @@ Si "acceptable" es true, "suggestions" puede ser [] o con mejoras menores opcion
 Si "acceptable" es false, "suggestions" DEBE tener al menos 2 sugerencias concretas y accionables \
 que el Generador de Rúbrica pueda implementar directamente."""
 
-critico_agent = LlmAgent(
-    name="AgenteCritico",
-    model=MODEL,
-    instruction=INSTRUCTION,
-    output_key="evaluacion_critica",
-    description="Evalúa la rúbrica contra el Decreto 83/2015 y el perfil PACI. Responde en JSON.",
-)
+def make_critico_agent() -> LlmAgent:
+    return LlmAgent(
+        name="AgenteCritico",
+        model=MODEL,
+        instruction=INSTRUCTION,
+        output_key="evaluacion_critica",
+        description="Evalúa la rúbrica contra el Decreto 83/2015 y el perfil PACI. Responde en JSON.",
+    )

@@ -17,25 +17,25 @@ class TestClassifyResponse:
 
     def test_respuesta_aprobada_devuelve_true(self):
         from agent import _classify_response
-        with patch("agent.genai.Client") as MockClient:
-            MockClient.return_value.models.generate_content.return_value = _make_mock_response("APROBADO")
+        with patch("agent._get_genai_client") as mock_get:
+            mock_get.return_value.models.generate_content.return_value = _make_mock_response("APROBADO")
             assert _classify_response("si, está bien") is True
 
     def test_respuesta_rechazada_devuelve_false(self):
         from agent import _classify_response
-        with patch("agent.genai.Client") as MockClient:
-            MockClient.return_value.models.generate_content.return_value = _make_mock_response("RECHAZADO")
+        with patch("agent._get_genai_client") as mock_get:
+            mock_get.return_value.models.generate_content.return_value = _make_mock_response("RECHAZADO")
             assert _classify_response("no me parece correcto") is False
 
     def test_respuesta_con_espacios_y_minusculas(self):
         from agent import _classify_response
-        with patch("agent.genai.Client") as MockClient:
-            MockClient.return_value.models.generate_content.return_value = _make_mock_response("  aprobado  ")
+        with patch("agent._get_genai_client") as mock_get:
+            mock_get.return_value.models.generate_content.return_value = _make_mock_response("  aprobado  ")
             assert _classify_response("dale") is True
 
     def test_respuesta_inesperada_del_llm_devuelve_false(self):
         """Si el LLM no devuelve APROBADO ni RECHAZADO, se trata como rechazo."""
         from agent import _classify_response
-        with patch("agent.genai.Client") as MockClient:
-            MockClient.return_value.models.generate_content.return_value = _make_mock_response("No sé")
+        with patch("agent._get_genai_client") as mock_get:
+            mock_get.return_value.models.generate_content.return_value = _make_mock_response("No sé")
             assert _classify_response("quizás") is False

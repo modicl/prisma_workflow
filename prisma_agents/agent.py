@@ -16,15 +16,27 @@ import json
 import re
 
 from google.adk.agents import BaseAgent
+from google.adk.agents.llm_agent import LlmAgent
 from google.adk.agents.invocation_context import InvocationContext
 from google.adk.events import Event
 from typing import AsyncGenerator
 from google import genai
+from google.genai import types as genai_types
 
-from agents.analizador_paci import analizador_paci_agent
-from agents.adaptador import adaptador_agent
-from agents.generador_rubrica import generador_rubrica_agent
-from agents.critico import critico_agent
+from agents.analizador_paci import make_analizador_paci_agent
+from agents.adaptador import make_adaptador_agent
+from agents.generador_rubrica import make_generador_rubrica_agent
+from agents.critico import make_critico_agent
+
+_genai_client: genai.Client | None = None
+
+
+def _get_genai_client() -> genai.Client:
+    global _genai_client
+    if _genai_client is None:
+        _genai_client = genai.Client()
+    return _genai_client
+
 
 _CLASSIFY_PROMPT = (
     "Clasifica si el siguiente mensaje de un docente indica APROBACIÓN o RECHAZO "
@@ -38,11 +50,11 @@ def _classify_response(respuesta: str) -> bool:
 
     Retorna True si es aprobación, False si es rechazo o respuesta inesperada.
     """
-    client = genai.Client()
     prompt = _CLASSIFY_PROMPT.format(respuesta=respuesta)
-    response = client.models.generate_content(
+    response = _get_genai_client().models.generate_content(
         model="gemini-2.5-flash-lite",
         contents=prompt,
+        config=genai_types.GenerateContentConfig(max_output_tokens=5),
     )
     return response.text.strip().upper() == "APROBADO"
 
@@ -93,19 +105,27 @@ class PaciWorkflowAgent(BaseAgent):
 
     model_config = {"arbitrary_types_allowed": True}
 
+    analizador_paci_agent: LlmAgent = None
+    adaptador_agent: LlmAgent = None
+    generador_rubrica_agent: LlmAgent = None
+    critico_agent: LlmAgent = None
+
     def __init__(self):
+        _analizador = make_analizador_paci_agent()
+        _adaptador = make_adaptador_agent()
+        _generador = make_generador_rubrica_agent()
+        _critico = make_critico_agent()
         super().__init__(
             name="PaciWorkflow",
             description=(
                 "Coordina el flujo completo: analiza el PACI, adapta el material "
                 "educativo y genera una rúbrica revisada críticamente."
             ),
-            sub_agents=[
-                analizador_paci_agent,
-                adaptador_agent,
-                generador_rubrica_agent,
-                critico_agent,
-            ],
+            sub_agents=[_analizador, _adaptador, _generador, _critico],
+            analizador_paci_agent=_analizador,
+            adaptador_agent=_adaptador,
+            generador_rubrica_agent=_generador,
+            critico_agent=_critico,
         )
 
     async def _run_async_impl(
@@ -114,14 +134,14 @@ class PaciWorkflowAgent(BaseAgent):
 
         # ── Agente 1: Análisis del PACI ──────────────────────────────────────
         print("\n[Agente 1] Analizando PACI...\n")
-        async for event in _run_with_timeout(analizador_paci_agent, ctx, "Agente 1"):
+        async for event in _run_with_timeout(self.analizador_paci_agent, ctx, "Agente 1"):
             yield event
         if ctx.session.state.get("status") == "timeout":
             return
 
         # ── Agente 2: Adaptación del material ────────────────────────────────
         print("\n[Agente 2] Adaptando material educativo...\n")
-        async for event in _run_with_timeout(adaptador_agent, ctx, "Agente 2"):
+        async for event in _run_with_timeout(self.adaptador_agent, ctx, "Agente 2"):
             yield event
         if ctx.session.state.get("status") == "timeout":
             return
@@ -129,13 +149,13 @@ class PaciWorkflowAgent(BaseAgent):
         # ── Loop: Generador de Rúbrica + Agente Crítico ───────────────────────
         for iteration in range(1, MAX_ITERATIONS + 1):
             print(f"\n[Agente 3 — Iteración {iteration}/{MAX_ITERATIONS}] Generando rúbrica...\n")
-            async for event in _run_with_timeout(generador_rubrica_agent, ctx, f"Agente 3 (it.{iteration})"):
+            async for event in _run_with_timeout(self.generador_rubrica_agent, ctx, f"Agente 3 (it.{iteration})"):
                 yield event
             if ctx.session.state.get("status") == "timeout":
                 return
 
             print(f"\n[Agente Crítico — Iteración {iteration}/{MAX_ITERATIONS}] Evaluando rúbrica...\n")
-            async for event in _run_with_timeout(critico_agent, ctx, f"Agente Crítico (it.{iteration})"):
+            async for event in _run_with_timeout(self.critico_agent, ctx, f"Agente Crítico (it.{iteration})"):
                 yield event
             if ctx.session.state.get("status") == "timeout":
                 return
@@ -193,6 +213,4 @@ def _parse_critic_json(raw: str) -> dict:
     }
 
 
-import os as _os
-if not _os.environ.get("PYTEST_CURRENT_TEST"):
-    root_agent = PaciWorkflowAgent()
+root_agent = PaciWorkflowAgent()
