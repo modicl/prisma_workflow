@@ -112,6 +112,7 @@ def _hitl_checkpoint(
 
 
 MAX_ITERATIONS = 3
+MAX_HITL_ITERATIONS = 6          # intentos de revisión del profesor
 AGENT_TIMEOUT_SECONDS = 90   # segundos por agente antes de considerar timeout
 MAX_RETRIES_ON_TIMEOUT = 2   # reintentos adicionales si el agente hace timeout
 RETRY_DELAY_SECONDS = 5      # espera entre reintentos
