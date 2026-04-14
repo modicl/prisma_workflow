@@ -95,3 +95,107 @@ class TestHitlCheckpoint:
             aprobado, razon, agente = _hitl_checkpoint(state, attempt=6, max_attempts=6)
         assert aprobado is False
         assert agente == 0
+
+
+import asyncio
+import pytest
+
+
+class TestHitlLoop:
+    """Tests de integración para el loop HITL en PaciWorkflowAgent."""
+
+    def _run(self, coro):
+        return asyncio.get_event_loop().run_until_complete(coro)
+
+    def _make_ctx(self, state: dict):
+        """Crea un InvocationContext mock con session.state."""
+        ctx = MagicMock()
+        ctx.session.state = state
+        return ctx
+
+    def _make_state(self):
+        return {
+            "paci_document": "doc paci",
+            "material_document": "material",
+            "critica_previa": "",
+            "hitl_feedback_a1": "",
+            "hitl_feedback_a2": "",
+            "perfil_paci": "Diagnóstico: TDAH",
+            "planificacion_adaptada": "Adecuación NO SIGNIFICATIVA",
+            "rubrica": "rubrica generada",
+            "evaluacion_critica": '{"acceptable": true, "critique": "", "suggestions": []}',
+        }
+
+    def test_aprobacion_directa_no_cancela(self):
+        """Si el profesor aprueba en el primer intento, status no es hitl_rejected."""
+        from agent import PaciWorkflowAgent
+
+        async def empty_async_gen(*args, **kwargs):
+            return
+            yield
+
+        state = self._make_state()
+        ctx = self._make_ctx(state)
+        agent = PaciWorkflowAgent()
+
+        async def run():
+            with patch("agent._hitl_checkpoint", return_value=(True, "", 0)), \
+                 patch("agent._run_with_timeout", side_effect=empty_async_gen):
+                async for _ in agent._run_async_impl(ctx):
+                    pass
+
+        self._run(run())
+        assert state.get("status") != "hitl_rejected"
+
+    def test_intentos_agotados_cancela_con_hitl_rejected(self):
+        """Si se agotan los intentos (agente=0), status queda en hitl_rejected."""
+        from agent import PaciWorkflowAgent
+
+        async def empty_async_gen(*args, **kwargs):
+            return
+            yield
+
+        state = self._make_state()
+        ctx = self._make_ctx(state)
+        agent = PaciWorkflowAgent()
+
+        async def run():
+            # Siempre rechaza con agente=0 (último intento agotado)
+            with patch("agent._hitl_checkpoint", return_value=(False, "siempre mal", 0)), \
+                 patch("agent._run_with_timeout", side_effect=empty_async_gen):
+                async for _ in agent._run_async_impl(ctx):
+                    pass
+
+        self._run(run())
+        assert state.get("status") == "hitl_rejected"
+
+    def test_rechazo_agente2_reinyecta_feedback_a2(self):
+        """Si el profesor rechaza eligiendo agente 2, se inyecta hitl_feedback_a2."""
+        from agent import PaciWorkflowAgent
+
+        async def empty_async_gen(*args, **kwargs):
+            return
+            yield
+
+        state = self._make_state()
+        ctx = self._make_ctx(state)
+        agent = PaciWorkflowAgent()
+
+        # Primera llamada rechaza con agente 2, segunda aprueba
+        hitl_responses = [(False, "falta DUA", 2), (True, "", 0)]
+        call_count = {"n": 0}
+
+        def mock_hitl(s, attempt, max_attempts):
+            result = hitl_responses[call_count["n"]]
+            call_count["n"] += 1
+            return result
+
+        async def run():
+            with patch("agent._hitl_checkpoint", side_effect=mock_hitl), \
+                 patch("agent._run_with_timeout", side_effect=empty_async_gen):
+                async for _ in agent._run_async_impl(ctx):
+                    pass
+
+        self._run(run())
+        assert "falta DUA" in state.get("hitl_feedback_a2", "")
+        assert state.get("status") != "hitl_rejected"

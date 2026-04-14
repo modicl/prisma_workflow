@@ -3,7 +3,12 @@ PaciWorkflowAgent — Orquestador principal del flujo multi-agente PACI.
 
 Flujo:
   1. AnalizadorPACI   → perfil_paci
-  2. Adaptador        → planificacion_adaptada
+  2. Loop HITL (max 6 intentos):
+       Adaptador        → planificacion_adaptada
+       Checkpoint docente → aprueba o rechaza
+       Si rechaza agente 1: re-corre AnalizadorPACI + Adaptador
+       Si rechaza agente 2: re-corre solo Adaptador
+       Si intentos agotados: status = "hitl_rejected", cancela
   3. Loop (max 3):
        GeneradorRubrica → rubrica
        AgenteCritico    → evaluacion_critica
@@ -185,19 +190,54 @@ class PaciWorkflowAgent(BaseAgent):
         self, ctx: InvocationContext
     ) -> AsyncGenerator[Event, None]:
 
-        # ── Agente 1: Análisis del PACI ──────────────────────────────────────
+        # ── Agente 1: Análisis inicial del PACI ──────────────────────────────
         print("\n[Agente 1] Analizando PACI...\n")
         async for event in _run_with_timeout(self.analizador_paci_agent, ctx, "Agente 1"):
             yield event
         if ctx.session.state.get("status") == "timeout":
             return
 
-        # ── Agente 2: Adaptación del material ────────────────────────────────
-        print("\n[Agente 2] Adaptando material educativo...\n")
-        async for event in _run_with_timeout(self.adaptador_agent, ctx, "Agente 2"):
-            yield event
-        if ctx.session.state.get("status") == "timeout":
-            return
+        # ── Loop HITL: Agente 2 + aprobación del profesor ────────────────────
+        for hitl_attempt in range(1, MAX_HITL_ITERATIONS + 1):
+            print("\n[Agente 2] Adaptando material educativo...\n")
+            async for event in _run_with_timeout(self.adaptador_agent, ctx, "Agente 2"):
+                yield event
+            if ctx.session.state.get("status") == "timeout":
+                return
+
+            aprobado, razon, agente = _hitl_checkpoint(
+                ctx.session.state, attempt=hitl_attempt, max_attempts=MAX_HITL_ITERATIONS
+            )
+
+            if aprobado:
+                break
+
+            # Intentos agotados — cancela el flujo
+            if agente == 0:
+                ctx.session.state["status"] = "hitl_rejected"
+                return
+
+            # Inyectar feedback según el agente elegido por el profesor
+            if agente == 1:
+                ctx.session.state["hitl_feedback_a1"] = (
+                    f"\nRETROALIMENTACIÓN DEL DOCENTE — Debes revisar tu análisis "
+                    f"considerando el siguiente problema señalado:\n"
+                    f"\"{razon}\"\n"
+                    f"Ajusta tu respuesta para abordar específicamente este punto."
+                )
+                ctx.session.state["hitl_feedback_a2"] = ""
+                print("\n[Agente 1] Re-analizando PACI con feedback del docente...\n")
+                async for event in _run_with_timeout(self.analizador_paci_agent, ctx, "Agente 1 (retry)"):
+                    yield event
+                if ctx.session.state.get("status") == "timeout":
+                    return
+            else:  # agente == 2
+                ctx.session.state["hitl_feedback_a2"] = (
+                    f"\nRETROALIMENTACIÓN DEL DOCENTE — Debes revisar la adaptación "
+                    f"considerando el siguiente problema señalado:\n"
+                    f"\"{razon}\"\n"
+                    f"Ajusta tu respuesta para abordar específicamente este punto."
+                )
 
         # ── Loop: Generador de Rúbrica + Agente Crítico ───────────────────────
         for iteration in range(1, MAX_ITERATIONS + 1):
