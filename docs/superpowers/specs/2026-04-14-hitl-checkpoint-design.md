@@ -8,7 +8,7 @@
 
 ## Resumen
 
-Después de que el Agente 2 (Adaptador) termina su trabajo, el flujo se pausa y le presenta al profesor un resumen del análisis (Agente 1) y la planificación adaptada (Agente 2). El profesor aprueba o rechaza. Si rechaza, indica la razón y elige qué agente re-ejecutar. El ciclo se repite hasta que el profesor aprueba o se agotan los 6 intentos máximos.
+Después de que el Agente 2 (Adaptador) termina su trabajo, el flujo se pausa y le presenta al profesor un resumen del análisis (Agente 1) y la planificación adaptada (Agente 2). El profesor aprueba o rechaza. Si rechaza, indica la razón y elige qué agente re-ejecutar. El ciclo se repite hasta que el profesor aprueba. Si se agotan los 6 intentos sin aprobación, el proceso **se cancela** con estado `"hitl_rejected"`.
 
 ---
 
@@ -27,8 +27,8 @@ Agente 1 → perfil_paci
        - Pregunta: "¿Problema en análisis (1) o adaptación (2)?"
        - Agente 1 → re-corre Agente 1 + Agente 2
        - Agente 2 → re-corre solo Agente 2
-       - Si intentos agotados → aviso y continúa igual
-↓
+       - Si intentos agotados → aviso al profesor + cancela el proceso (status = "hitl_rejected")
+↓ (solo si aprobado)
 Loop Agente 3 + Crítico (sin cambios)
 ```
 
@@ -72,6 +72,7 @@ POSITIVE_RESPONSES = {
 1. El texto ingresado se guarda como `feedback_text` directamente
 2. Pregunta adicional: `"¿El problema está en el análisis del PACI (1) o en la adaptación del material (2)? "`
 3. Acepta `"1"` o `"2"`; si no reconoce la entrada, repregunta
+4. Si es el último intento disponible y el profesor rechaza: imprime aviso y retorna `(False, reason, 0)` para señalizar cancelación
 
 ---
 
