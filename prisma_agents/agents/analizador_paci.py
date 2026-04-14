@@ -106,7 +106,9 @@ ya que este perfil será utilizado por otros agentes para adaptar materiales y g
 
 REGLA CRÍTICA: NO incluyas saludos, introducciones, ni comentarios conversacionales \
 (ej. '¡Por supuesto!', 'Aquí tienes el análisis...'). Entrega EXCLUSIVAMENTE el \
-contenido solicitado usando los encabezados indicados."""
+contenido solicitado usando los encabezados indicados.
+
+{hitl_feedback_a1}"""
 
 analizador_paci_agent = LlmAgent(
     name="AnalizadorPACI",

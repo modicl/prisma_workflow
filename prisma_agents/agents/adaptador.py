@@ -99,7 +99,9 @@ Mantén la estructura del material original pero con todas las modificaciones se
 
 REGLA CRÍTICA: NO incluyas saludos, introducciones, ni comentarios conversacionales \
 (ej. '¡Absolutamente!', 'Procederé a adaptar...', 'A continuación presento...'). \
-Entrega EXCLUSIVAMENTE el material educativo adaptado y nada más."""
+Entrega EXCLUSIVAMENTE el material educativo adaptado y nada más.
+
+{hitl_feedback_a2}"""
 
 adaptador_agent = LlmAgent(
     name="Adaptador",
