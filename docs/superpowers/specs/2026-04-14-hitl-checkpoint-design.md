@@ -60,13 +60,19 @@ def _hitl_checkpoint(state: dict, attempt: int, max_attempts: int) -> tuple[bool
 3. Aviso de intentos: `"[Revisión {attempt}/{max_attempts}] — Quedan {restantes} intentos."`
 4. Pregunta: `"¿Aprueba el análisis y la planificación? "`
 
-**Detección de respuesta positiva** (insensible a mayúsculas/tildes):
-```python
-POSITIVE_RESPONSES = {
-    "si", "sí", "ok", "esta bien", "está bien",
-    "bien", "correcto", "aprobado", "yes", "dale", "listo"
-}
+**Detección de respuesta positiva** — llamada LLM (gemini-2.5-flash-lite):
+
+Se hace una llamada síncrona al modelo con un prompt de clasificación binaria:
+
 ```
+Clasifica si el siguiente mensaje de un docente indica APROBACIÓN o RECHAZO 
+del trabajo presentado. Responde únicamente con "APROBADO" o "RECHAZADO".
+
+Mensaje: "{respuesta_del_profesor}"
+```
+
+Retorna `True` si el modelo responde `"APROBADO"`, `False` si responde `"RECHAZADO"`.
+Esto permite que el profesor escriba cualquier texto natural positivo o negativo.
 
 **Si rechaza:**
 1. El texto ingresado se guarda como `feedback_text` directamente
