@@ -59,6 +59,58 @@ def _classify_response(respuesta: str) -> bool:
     return response.text.strip().upper() == "APROBADO"
 
 
+def _hitl_checkpoint(
+    state: dict, attempt: int, max_attempts: int
+) -> tuple[bool, str, int]:
+    """Pausa interactiva para que el profesor apruebe o rechace los resultados.
+
+    Retorna: (aprobado, razon, agente_a_reiniciar)
+    - aprobado=True  → continúa el flujo; razon="" y agente_a_reiniciar=0
+    - aprobado=False → razon contiene el feedback del profesor
+                       agente_a_reiniciar: 1 o 2, o 0 si se agotaron intentos
+    """
+    restantes = max_attempts - attempt
+
+    print("\n" + "═" * 60)
+    print(f"  REVISIÓN DEL DOCENTE [{attempt}/{max_attempts}]")
+    print("═" * 60)
+
+    print("\n── RESUMEN ANÁLISIS PACI (Agente 1) ────────────────────")
+    print(state.get("perfil_paci", "(sin datos)"))
+
+    print("\n── RESUMEN PLANIFICACIÓN ADAPTADA (Agente 2) ───────────")
+    print(state.get("planificacion_adaptada", "(sin datos)"))
+
+    if restantes > 0:
+        print(f"\n⚠  Quedan {restantes} intento(s) de revisión.")
+    else:
+        print("\n⚠  Este es el último intento de revisión.")
+
+    print("\n" + "─" * 60)
+    respuesta = input("¿Aprueba el análisis y la planificación? ").strip()
+
+    if _classify_response(respuesta):
+        return True, "", 0
+
+    # Último intento agotado — cancela sin preguntar agente
+    if attempt >= max_attempts:
+        print(
+            "\n✗ Proceso cancelado: se agotaron los intentos de revisión "
+            "sin obtener aprobación del docente.\n"
+        )
+        return False, respuesta, 0
+
+    # Pide agente a re-ejecutar
+    while True:
+        eleccion = input(
+            "¿El problema está en el análisis del PACI (1) "
+            "o en la adaptación del material (2)? "
+        ).strip()
+        if eleccion in ("1", "2"):
+            return False, respuesta, int(eleccion)
+        print("  Por favor ingresa 1 o 2.")
+
+
 MAX_ITERATIONS = 3
 AGENT_TIMEOUT_SECONDS = 90   # segundos por agente antes de considerar timeout
 MAX_RETRIES_ON_TIMEOUT = 2   # reintentos adicionales si el agente hace timeout
