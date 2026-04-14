@@ -105,7 +105,7 @@ class TestHitlLoop:
     """Tests de integración para el loop HITL en PaciWorkflowAgent."""
 
     def _run(self, coro):
-        return asyncio.get_event_loop().run_until_complete(coro)
+        return asyncio.run(coro)
 
     def _make_ctx(self, state: dict):
         """Crea un InvocationContext mock con session.state."""

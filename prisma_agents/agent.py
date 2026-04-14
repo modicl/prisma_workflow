@@ -232,6 +232,7 @@ class PaciWorkflowAgent(BaseAgent):
                 if ctx.session.state.get("status") == "timeout":
                     return
             else:  # agente == 2
+                ctx.session.state["hitl_feedback_a1"] = ""   # limpia feedback previo de a1
                 ctx.session.state["hitl_feedback_a2"] = (
                     f"\nRETROALIMENTACIÓN DEL DOCENTE — Debes revisar la adaptación "
                     f"considerando el siguiente problema señalado:\n"
