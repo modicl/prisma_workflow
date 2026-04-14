@@ -138,33 +138,26 @@ async def run_workflow(paci_path: str, material_path: str, prompt: str = "", use
     # Persistir reporte de tokens
     _save_token_report(session.id, tracker, results["status"])
 
-    # Imprimir resultados finales
-    print(f"\n{'='*60}")
-    print("  RESULTADOS FINALES")
-    print(f"{'='*60}\n")
-
-    print("── PERFIL PACI ──────────────────────────────────────────")
-    print(results["perfil_paci"] or "(vacío)")
-
-    print("\n── PLANIFICACIÓN ADAPTADA ───────────────────────────────")
-    print(results["planificacion_adaptada"] or "(vacío)")
-
-    print("\n── RÚBRICA FINAL ────────────────────────────────────────")
-    print(results["rubrica_final"] or "(vacío)")
-
-    print(f"\n{'='*60}\n")
-
     # Exportar a DOCX
     print("[Generando archivo DOCX...]")
+    docx_path = None
     try:
-        # Generamos un nombre dinámico basado en el documento base para evitar sobreescribir siempre el mismo
         base_name = os.path.basename(material_path).split('.')[0]
         output_name = f"rubrica_adaptada_{base_name}.docx"
         docx_path = export_results_to_docx(results, output_filename=output_name)
-        print(f"  ✓ ¡Documento exportado con éxito y listo para editar!")
-        print(f"  Ruta: {docx_path}\n")
     except Exception as e:
         print(f"  x Error al exportar a DOCX: {e}\n")
+
+    # Resumen final — el contenido queda en el DOCX, no en consola
+    print(f"\n{'='*60}")
+    print("  FLUJO COMPLETADO")
+    print(f"{'='*60}")
+    print(f"  Estado : {results['status']}")
+    if docx_path:
+        print(f"  Archivo: {docx_path}")
+    else:
+        print("  Archivo: no generado (ver error arriba)")
+    print(f"{'='*60}\n")
 
     return results
 

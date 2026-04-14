@@ -74,6 +74,7 @@ def _load_pdf(path: Path, label: str | None) -> str:
     client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY"))
 
     # Paso 1: Subir el PDF directamente a la nube (Workspace temporal del modelo)
+    print(f"  → Subiendo {label or path.name} a Google Files API...")
     with open(path, "rb") as f:
         uploaded = client.files.upload(
             file=f,
@@ -83,6 +84,7 @@ def _load_pdf(path: Path, label: str | None) -> str:
     # Paso 2: Invocar a gemini-2.5-flash-lite para que "lea" la imagen del PDF.
     # El bloque try/finally garantiza que el archivo se elimine de los servidores de Google
     # incluso si la llamada al modelo falla, evitando retención de PII en la nube.
+    print(f"  → Transcribiendo con Gemini...         (puede tardar 20-60s según el PDF)")
     try:
         response = client.models.generate_content(
             model="gemini-2.5-flash-lite",
@@ -96,12 +98,15 @@ def _load_pdf(path: Path, label: str | None) -> str:
     finally:
         # Eliminar el archivo subido independientemente del resultado.
         # Google retiene archivos 48 h si no se borran explícitamente.
+        print(f"  → Eliminando archivo de la nube...")
         client.files.delete(name=uploaded.name)
 
     # Añadimos una cabecera para que cuando el agente ADK lea este megatexto del estado (state)
     # sepa visualmente de qué archivo proviene.
     prefix = f"[Documento PDF: {label or path.name}]\n\n" if label else f"[{path.name}]\n\n"
-    return prefix + response.text
+    text = prefix + response.text
+    print(f"  ✓ {label or path.name} cargado ({len(text):,} caracteres)")
+    return text
 
 
 def _load_docx(path: Path, label: str | None) -> str:
