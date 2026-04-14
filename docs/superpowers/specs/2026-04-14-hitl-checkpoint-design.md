@@ -46,6 +46,7 @@ MAX_HITL_ITERATIONS = 6   # intentos de revisión del profesor
 ## Función `_hitl_checkpoint()`
 
 **Firma:**
+
 ```python
 def _hitl_checkpoint(state: dict, attempt: int, max_attempts: int) -> tuple[bool, str, int]:
     """
@@ -55,6 +56,7 @@ def _hitl_checkpoint(state: dict, attempt: int, max_attempts: int) -> tuple[bool
 ```
 
 **Salida que imprime:**
+
 1. Resumen compacto de `perfil_paci` (diagnóstico + estrategias)
 2. Resumen compacto de `planificacion_adaptada` (adecuaciones aplicadas)
 3. Aviso de intentos: `"[Revisión {attempt}/{max_attempts}] — Quedan {restantes} intentos."`
@@ -65,7 +67,7 @@ def _hitl_checkpoint(state: dict, attempt: int, max_attempts: int) -> tuple[bool
 Se hace una llamada síncrona al modelo con un prompt de clasificación binaria:
 
 ```
-Clasifica si el siguiente mensaje de un docente indica APROBACIÓN o RECHAZO 
+Clasifica si el siguiente mensaje de un docente indica APROBACIÓN o RECHAZO
 del trabajo presentado. Responde únicamente con "APROBADO" o "RECHAZADO".
 
 Mensaje: "{respuesta_del_profesor}"
@@ -75,6 +77,7 @@ Retorna `True` si el modelo responde `"APROBADO"`, `False` si responde `"RECHAZA
 Esto permite que el profesor escriba cualquier texto natural positivo o negativo.
 
 **Si rechaza:**
+
 1. El texto ingresado se guarda como `feedback_text` directamente
 2. Pregunta adicional: `"¿El problema está en el análisis del PACI (1) o en la adaptación del material (2)? "`
 3. Acepta `"1"` o `"2"`; si no reconoce la entrada, repregunta
@@ -86,17 +89,17 @@ Esto permite que el profesor escriba cualquier texto natural positivo o negativo
 
 Dos claves nuevas inicializadas como `""` en `run.py`:
 
-| Clave | Usado por |
-|-------|-----------|
+| Clave              | Usado por      |
+| ------------------ | -------------- |
 | `hitl_feedback_a1` | AnalizadorPACI |
-| `hitl_feedback_a2` | Adaptador |
+| `hitl_feedback_a2` | Adaptador      |
 
 **Regla de llenado en el orquestador:**
 
 ```python
 # Profesor elige agente 1:
 state["hitl_feedback_a1"] = (
-    f"\n⚠ RETROALIMENTACIÓN DEL DOCENTE — Debes revisar tu análisis "
+    f"\nRETROALIMENTACIÓN DEL DOCENTE — Debes revisar tu análisis "
     f"considerando el siguiente problema señalado:\n"
     f"\"{reason}\"\n"
     f"Ajusta tu respuesta para abordar específicamente este punto."
@@ -105,7 +108,7 @@ state["hitl_feedback_a2"] = ""   # reset adaptador para re-correr limpio
 
 # Profesor elige agente 2:
 state["hitl_feedback_a2"] = (
-    f"\n⚠ RETROALIMENTACIÓN DEL DOCENTE — Debes revisar la adaptación "
+    f"\nRETROALIMENTACIÓN DEL DOCENTE — Debes revisar la adaptación "
     f"considerando el siguiente problema señalado:\n"
     f"\"{reason}\"\n"
     f"Ajusta tu respuesta para abordar específicamente este punto."
@@ -115,10 +118,10 @@ state["hitl_feedback_a2"] = (
 
 **Agentes que se re-corren según elección:**
 
-| Elección | Re-corre |
-|----------|----------|
-| 1 | Agente 1 → Agente 2 |
-| 2 | Solo Agente 2 |
+| Elección | Re-corre            |
+| -------- | ------------------- |
+| 1        | Agente 1 → Agente 2 |
+| 2        | Solo Agente 2       |
 
 ---
 
@@ -127,11 +130,13 @@ state["hitl_feedback_a2"] = (
 Al final de cada instrucción se agrega el placeholder:
 
 **AnalizadorPACI (`analizador_paci.py`):**
+
 ```
 {hitl_feedback_a1}
 ```
 
 **Adaptador (`adaptador.py`):**
+
 ```
 {hitl_feedback_a2}
 ```
@@ -158,9 +163,9 @@ state={
 
 ## Archivos modificados
 
-| Archivo | Cambio |
-|---------|--------|
-| `prisma_agents/agent.py` | Constante `MAX_HITL_ITERATIONS`, función `_hitl_checkpoint()`, loop HITL en `_run_async_impl` |
-| `prisma_agents/agents/analizador_paci.py` | Agregar `{hitl_feedback_a1}` al final de `INSTRUCTION` |
-| `prisma_agents/agents/adaptador.py` | Agregar `{hitl_feedback_a2}` al final de `INSTRUCTION` |
-| `prisma_agents/run.py` | Inicializar `hitl_feedback_a1` y `hitl_feedback_a2` en session state |
+| Archivo                                   | Cambio                                                                                        |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `prisma_agents/agent.py`                  | Constante `MAX_HITL_ITERATIONS`, función `_hitl_checkpoint()`, loop HITL en `_run_async_impl` |
+| `prisma_agents/agents/analizador_paci.py` | Agregar `{hitl_feedback_a1}` al final de `INSTRUCTION`                                        |
+| `prisma_agents/agents/adaptador.py`       | Agregar `{hitl_feedback_a2}` al final de `INSTRUCTION`                                        |
+| `prisma_agents/run.py`                    | Inicializar `hitl_feedback_a1` y `hitl_feedback_a2` en session state                          |

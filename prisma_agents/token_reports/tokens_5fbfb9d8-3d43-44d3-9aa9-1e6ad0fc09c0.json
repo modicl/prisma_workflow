@@ -1,0 +1,36 @@
+{
+  "session_id": "5fbfb9d8-3d43-44d3-9aa9-1e6ad0fc09c0",
+  "timestamp": "2026-04-14T16:44:34.462942",
+  "status": "success",
+  "tokens": {
+    "total": 24342,
+    "input": 19407,
+    "output": 4935,
+    "by_agent": {
+      "AnalizadorPACI": {
+        "input_tokens": 1838,
+        "output_tokens": 751,
+        "total_tokens": 2589,
+        "calls": 1
+      },
+      "Adaptador": {
+        "input_tokens": 3446,
+        "output_tokens": 1832,
+        "total_tokens": 5278,
+        "calls": 1
+      },
+      "GeneradorRubrica": {
+        "input_tokens": 6617,
+        "output_tokens": 1358,
+        "total_tokens": 7975,
+        "calls": 1
+      },
+      "AgenteCritico": {
+        "input_tokens": 7506,
+        "output_tokens": 994,
+        "total_tokens": 8500,
+        "calls": 1
+      }
+    }
+  }
+}
