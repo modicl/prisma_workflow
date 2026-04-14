@@ -96,6 +96,8 @@ async def run_workflow(paci_path: str, material_path: str, prompt: str = "", use
             "paci_document": paci_text,
             "material_document": material_text,
             "critica_previa": "",  # vacío en la primera iteración
+            "hitl_feedback_a1": "",   # feedback para AnalizadorPACI
+            "hitl_feedback_a2": "",   # feedback para Adaptador
         },
     )
 
