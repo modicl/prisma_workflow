@@ -1,4 +1,5 @@
-"""Tests para la función _classify_response() del módulo agent."""
+"""Tests para las funciones HITL del módulo agent."""
+import asyncio
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -97,10 +98,6 @@ class TestHitlCheckpoint:
         assert agente == 0
 
 
-import asyncio
-import pytest
-
-
 class TestHitlLoop:
     """Tests de integración para el loop HITL en PaciWorkflowAgent."""
 
@@ -160,7 +157,6 @@ class TestHitlLoop:
         agent = PaciWorkflowAgent()
 
         async def run():
-            # Siempre rechaza con agente=0 (último intento agotado)
             with patch("agent._hitl_checkpoint", return_value=(False, "siempre mal", 0)), \
                  patch("agent._run_with_timeout", side_effect=empty_async_gen):
                 async for _ in agent._run_async_impl(ctx):
@@ -181,7 +177,6 @@ class TestHitlLoop:
         ctx = self._make_ctx(state)
         agent = PaciWorkflowAgent()
 
-        # Primera llamada rechaza con agente 2, segunda aprueba
         hitl_responses = [(False, "falta DUA", 2), (True, "", 0)]
         call_count = {"n": 0}
 
@@ -198,4 +193,36 @@ class TestHitlLoop:
 
         self._run(run())
         assert "falta DUA" in state.get("hitl_feedback_a2", "")
+        assert state.get("status") != "hitl_rejected"
+
+    def test_rechazo_agente1_reinyecta_feedback_a1(self):
+        """Si el profesor rechaza eligiendo agente 1, se inyecta hitl_feedback_a1 y se limpia a2."""
+        from agent import PaciWorkflowAgent
+
+        async def empty_async_gen(*args, **kwargs):
+            return
+            yield
+
+        state = self._make_state()
+        state["hitl_feedback_a2"] = "feedback previo de a2"  # debe limpiarse
+        ctx = self._make_ctx(state)
+        agent = PaciWorkflowAgent()
+
+        hitl_responses = [(False, "el análisis omitió las fortalezas", 1), (True, "", 0)]
+        call_count = {"n": 0}
+
+        def mock_hitl(s, attempt, max_attempts):
+            result = hitl_responses[call_count["n"]]
+            call_count["n"] += 1
+            return result
+
+        async def run():
+            with patch("agent._hitl_checkpoint", side_effect=mock_hitl), \
+                 patch("agent._run_with_timeout", side_effect=empty_async_gen):
+                async for _ in agent._run_async_impl(ctx):
+                    pass
+
+        self._run(run())
+        assert "el análisis omitió las fortalezas" in state.get("hitl_feedback_a1", "")
+        assert state.get("hitl_feedback_a2") == ""   # limpiado al elegir agente 1
         assert state.get("status") != "hitl_rejected"
