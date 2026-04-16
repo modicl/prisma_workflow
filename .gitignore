@@ -2,6 +2,7 @@
 venv/
 .claude/
 .env
+.worktrees/
 
 docs/
 docs_test/
