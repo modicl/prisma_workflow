@@ -106,12 +106,15 @@ ya que este perfil será utilizado por otros agentes para adaptar materiales y g
 
 REGLA CRÍTICA: NO incluyas saludos, introducciones, ni comentarios conversacionales \
 (ej. '¡Por supuesto!', 'Aquí tienes el análisis...'). Entrega EXCLUSIVAMENTE el \
-contenido solicitado usando los encabezados indicados."""
+contenido solicitado usando los encabezados indicados.
 
-analizador_paci_agent = LlmAgent(
-    name="AnalizadorPACI",
-    model=MODEL,
-    instruction=INSTRUCTION,
-    output_key="perfil_paci",
-    description="Analiza el documento PACI y extrae NEE, perfil de aprendizaje, estrategias y objetivos del estudiante.",
-)
+{hitl_feedback_a1}"""
+
+def make_analizador_paci_agent() -> LlmAgent:
+    return LlmAgent(
+        name="AnalizadorPACI",
+        model=MODEL,
+        instruction=INSTRUCTION,
+        output_key="perfil_paci",
+        description="Analiza el documento PACI y extrae NEE, perfil de aprendizaje, estrategias y objetivos del estudiante.",
+    )

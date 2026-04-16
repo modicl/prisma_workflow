@@ -17,9 +17,19 @@ Dado el PACI de un estudiante y un material educativo base, el sistema ejecuta a
         Extrae NEE, perfil de aprendizaje, OA priorizados
         y consideraciones de evaluación desde el PACI.
                         ↓
-        Agente 2 — Adaptador
-        Reescribe el material educativo base aplicando
-        principios DUA y adecuaciones del Decreto 83/2015.
+        ┌─────── CHECKPOINT HITL (máx. 6 intentos) ──────────┐
+        │ Agente 2 — Adaptador                               │
+        │ Reescribe el material educativo base aplicando     │
+        │ principios DUA y adecuaciones del Decreto 83/2015. │
+        │                  ↓                                 │
+        │ El docente revisa el análisis y la adaptación      │
+        │ y decide si aprobar o rechazar.                    │
+        │  ✅ Aprueba       → continúa el flujo              │
+        │  ❌ Rechaza       → elige qué agente corregir      │
+        │     Agente 1      → re-analiza el PACI             │
+        │     Agente 2      → re-adapta el material          │
+        │  ⛔ Sin aprobación → proceso cancelado             │
+        └─────────────────────────────────────────────────────┘
                         ↓
         Agente 3 — GeneradorRúbrica  ←──────────────┐
         Genera una rúbrica de evaluación adaptada    │
@@ -32,7 +42,7 @@ Dado el PACI de un estudiante y un material educativo base, el sistema ejecuta a
         Si no es aceptable → retroalimentación ──────┘
         (máximo 3 intentos)
                         ↓
-        RESULTADO: Perfil PACI + Planificación adaptada + Rúbrica final
+        RESULTADO: rubrica_adaptada_<nombre_material>.docx
 ```
 
 ---
@@ -92,7 +102,31 @@ GOOGLE_API_KEY=tu_api_key_aqui
 ## Uso
 
 ```bash
-python run.py <paci_path> <material_path> [prompt_adicional]
+python run.py <paci_path> <material_path> [prompt_adicional] [user_id]
+```
+
+| Argumento          | Obligatorio | Descripción                                         |
+| ------------------ | ----------- | --------------------------------------------------- |
+| `paci_path`        | ✅           | Ruta al PACI del estudiante (`.pdf`, `.docx`, `.json`) |
+| `material_path`    | ✅           | Ruta al material educativo base (`.pdf`, `.docx`)   |
+| `prompt_adicional` | ❌           | Instrucción extra para los agentes                  |
+| `user_id`          | ❌           | ID del docente (se genera UUID automáticamente)     |
+
+### Probar con los documentos de ejemplo
+
+```bash
+cd prisma_agents
+python run.py ../docs_test/paci_test.pdf ../docs_test/material_base_test.pdf
+```
+
+### Otros ejemplos
+
+```bash
+# Con instrucción adicional
+python run.py ../docs_test/paci_test.pdf ../docs_test/material_base_test.pdf "Foco en comprensión lectora"
+
+# PACI en JSON + material en DOCX
+python run.py datos/paci_alumno.json datos/guia_matematicas.docx
 ```
 
 ### Formatos soportados
@@ -103,19 +137,6 @@ python run.py <paci_path> <material_path> [prompt_adicional]
 | Material base       | `.pdf`, `.docx`          |
 
 > El formato `.json` es para PACI exportados desde formularios digitales (Google Forms, plataformas MINEDUC, etc.)
-
-### Ejemplos
-
-```bash
-# PACI en PDF + material en DOCX
-python run.py datos/paci.pdf datos/guia_matematicas.docx
-
-# PACI en JSON + material en PDF
-python run.py datos/paci_alumno.json datos/texto_historia.pdf
-
-# Con instrucción adicional
-python run.py datos/paci.pdf datos/planificacion.docx "Foco en comprensión lectora"
-```
 
 ### Dashboard de Consumo de Tokens
 
@@ -130,23 +151,52 @@ python dashboard.py --html          # Exportar informe como un dashboard web loc
 
 ---
 
+## HITL — Checkpoint del docente
+
+Después de que el Agente 2 genera la planificación adaptada, el flujo se **pausa** y presenta al docente un resumen del análisis y la adaptación para su revisión.
+
+El docente puede escribir en lenguaje natural — el sistema usa un LLM para clasificar si la respuesta es positiva o negativa, sin lista de palabras clave.
+
+```
+══════════════════════════════════════════════════════════════
+  REVISIÓN DEL DOCENTE [1/6]
+══════════════════════════════════════════════════════════════
+
+── RESUMEN ANÁLISIS PACI (Agente 1) ────────────────────
+...
+
+── RESUMEN PLANIFICACIÓN ADAPTADA (Agente 2) ───────────
+...
+
+⚠  Quedan 5 intento(s) de revisión.
+──────────────────────────────────────────────────────────────
+¿Aprueba el análisis y la planificación?
+```
+
+Si **rechaza**, el sistema pide la razón (ese mismo mensaje es el feedback) y pregunta qué agente corregir:
+
+```
+¿El problema está en el análisis del PACI (1) o en la adaptación del material (2)?
+```
+
+- Elige **1** → el feedback se inyecta en el Agente 1, que re-analiza el PACI, y luego el Agente 2 re-adapta el material.
+- Elige **2** → el feedback se inyecta solo en el Agente 2, que re-adapta el material.
+- Si se agotan los **6 intentos** sin aprobación → el proceso se cancela (`status: hitl_rejected`).
+
+---
+
 ## Output
 
-El sistema imprime en consola el progreso de cada agente y al final entrega tres resultados:
-
 ```
-── PERFIL PACI ──────────────────────────────────────────
-Diagnóstico, NEE, perfil de aprendizaje, OA priorizados
-y consideraciones de evaluación extraídos del PACI.
-
-── PLANIFICACIÓN ADAPTADA ───────────────────────────────
-Material educativo base reescrito con adecuaciones DUA
-y etiquetas [ACCESO] / [NO SIGNIFICATIVA] / [ADECUACIÓN SIGNIFICATIVA].
-
-── RÚBRICA FINAL ────────────────────────────────────────
-Condiciones de aplicación + tabla de rúbrica con 4 niveles
-de desempeño + notas para el docente.
+══════════════════════════════════════════════════════════
+  FLUJO COMPLETADO
+══════════════════════════════════════════════════════════
+  Estado : success
+  Archivo: /ruta/rubrica_adaptada_<nombre_material>.docx
+══════════════════════════════════════════════════════════
 ```
+
+El contenido completo queda en el archivo `.docx` generado.
 
 ---
 
@@ -173,12 +223,7 @@ prisma_agents/
 
 ## Notas
 
-- El Agente Crítico puede rechazar la rúbrica hasta **3 veces**. En cada rechazo entrega retroalimentación específica al Generador para que la corrija. Si tras 3 intentos no es aprobada, se entrega la última versión generada.
+- El checkpoint HITL permite hasta **6 intentos** de revisión. Si el docente no aprueba tras 6 intentos, el proceso se cancela sin generar documento.
+- El Agente Crítico puede rechazar la rúbrica hasta **3 veces**. Si tras 3 intentos no es aprobada, se entrega la última versión generada.
 - Los PDF se procesan mediante la **API de Gemini Files**, lo que requiere conexión a internet y consume cuota de la API Key.
-- El estado de la sesión y el histórico de los tokens de cada agente ahora se manejan con identificadores únicos (`user_id`) permitiendo persistir las ejecuciones multi-docente de forma aislada en la base de datos PostgreSQL.
-
-## Ejemplo de uso
-
-python run.py datos/paci_juan.pdf datos/guia_ciencias.docx "prompt adicional"
-
-El primer archivo es el perfil PACI, el segundo el material base a adaptar y el tercero es un prompt opcional para guiar a los agentes.
+- El estado de la sesión y el histórico de los tokens de cada agente se manejan con identificadores únicos (`user_id`), permitiendo persistir las ejecuciones multi-docente de forma aislada en PostgreSQL.

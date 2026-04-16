@@ -107,10 +107,11 @@ REGLA CRÍTICA: NO incluyas saludos, introducciones, despedidas ni comentarios \
 conversacionales (ej. '¡Claro!', 'Espero que esta rúbrica sea útil...'). \
 Entrega EXCLUSIVAMENTE la rúbrica con las secciones solicitadas y nada más."""
 
-generador_rubrica_agent = LlmAgent(
-    name="GeneradorRubrica",
-    model=MODEL,
-    instruction=INSTRUCTION,
-    output_key="rubrica",
-    description="Genera una rúbrica de evaluación adaptada al perfil NEE del estudiante, cumpliendo el Decreto 83/2015.",
-)
+def make_generador_rubrica_agent() -> LlmAgent:
+    return LlmAgent(
+        name="GeneradorRubrica",
+        model=MODEL,
+        instruction=INSTRUCTION,
+        output_key="rubrica",
+        description="Genera una rúbrica de evaluación adaptada al perfil NEE del estudiante, cumpliendo el Decreto 83/2015.",
+    )

@@ -99,12 +99,15 @@ Mantén la estructura del material original pero con todas las modificaciones se
 
 REGLA CRÍTICA: NO incluyas saludos, introducciones, ni comentarios conversacionales \
 (ej. '¡Absolutamente!', 'Procederé a adaptar...', 'A continuación presento...'). \
-Entrega EXCLUSIVAMENTE el material educativo adaptado y nada más."""
+Entrega EXCLUSIVAMENTE el material educativo adaptado y nada más.
 
-adaptador_agent = LlmAgent(
-    name="Adaptador",
-    model=MODEL,
-    instruction=INSTRUCTION,
-    output_key="planificacion_adaptada",
-    description="Adapta el material educativo base al perfil NEE del estudiante aplicando DUA y el Decreto 83/2015.",
-)
+{hitl_feedback_a2}"""
+
+def make_adaptador_agent() -> LlmAgent:
+    return LlmAgent(
+        name="Adaptador",
+        model=MODEL,
+        instruction=INSTRUCTION,
+        output_key="planificacion_adaptada",
+        description="Adapta el material educativo base al perfil NEE del estudiante aplicando DUA y el Decreto 83/2015.",
+    )
