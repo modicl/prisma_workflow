@@ -118,7 +118,7 @@ def get_reference_materials(
     Retorna el texto transcrito de hasta 3 PDFs seleccionados por el LLM.
     Retorna "" si no hay materiales, school_id vacío, o cualquier error.
     """
-    if not school_id or not subject or not grade:
+    if not school_id or not subject or not grade or not perfil_paci:
         return ""
     try:
         index = read_index(school_id, subject, grade)

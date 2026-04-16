@@ -87,7 +87,7 @@ def test_read_index_404_returns_none():
     assert result is None
 
 
-from tools.book_repository import select_materials_with_llm, get_reference_materials
+from tools.book_repository import select_materials_with_llm, get_reference_materials, transcribe_pdf_from_s3
 
 
 def test_select_materials_returns_llm_choice():
@@ -152,4 +152,35 @@ def test_get_reference_materials_filters_unlisted_filenames():
 def test_get_reference_materials_s3_error_returns_empty():
     with patch("tools.book_repository.read_index", side_effect=Exception("S3 unreachable")):
         result = get_reference_materials("school_x", "matematica", "5basico", "perfil")
+    assert result == ""
+
+
+def test_transcribe_pdf_from_s3_happy_path_and_cleanup():
+    """Verifica el happy path y que el finally limpia temp file y archivo Gemini."""
+    mock_s3 = MagicMock()
+    mock_uploaded_file = MagicMock()
+    mock_uploaded_file.name = "files/abc123"
+
+    mock_response = MagicMock()
+    mock_response.text = "Contenido del PDF transcrito"
+
+    mock_client = MagicMock()
+    mock_client.files.upload.return_value = mock_uploaded_file
+    mock_client.models.generate_content.return_value = mock_response
+
+    with patch("tools.book_repository._get_s3_client", return_value=mock_s3), \
+         patch("tools.book_repository.genai.Client", return_value=mock_client), \
+         patch("tools.book_repository.os.unlink") as mock_unlink, \
+         patch.dict(os.environ, {"S3_BUCKET_NAME": "prisma-schools-repos"}):
+        result = transcribe_pdf_from_s3("school_x", "matematica", "5basico", "mat1.pdf")
+
+    assert result == "=== mat1.pdf ===\nContenido del PDF transcrito"
+    # Verifica cleanup: el archivo Gemini fue eliminado
+    mock_client.files.delete.assert_called_once_with(name="files/abc123")
+    # Verifica cleanup: el archivo temporal fue eliminado
+    mock_unlink.assert_called_once()
+
+
+def test_get_reference_materials_empty_perfil_paci():
+    result = get_reference_materials("school_x", "matematica", "5basico", "")
     assert result == ""
