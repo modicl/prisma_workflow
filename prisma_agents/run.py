@@ -54,7 +54,7 @@ def _save_token_report(session_id: str, tracker: SessionTokenUsage, status: str)
 APP_NAME = "paci_workflow"
 
 
-async def run_workflow(paci_path: str, material_path: str, prompt: str = "", user_id: str = "") -> dict:
+async def run_workflow(paci_path: str, material_path: str, prompt: str = "", user_id: str = "", school_id: str = "") -> dict:
     """Ejecuta el flujo multi-agente PACI y retorna los resultados.
 
     Args:
@@ -71,6 +71,8 @@ async def run_workflow(paci_path: str, material_path: str, prompt: str = "", use
     print(f"  PACI:     {paci_path}")
     print(f"  Material: {material_path}")
     print(f"  User ID:  {effective_user_id}")
+    if school_id:
+        print(f"  School:   {school_id}")
     if prompt:
         print(f"  Prompt:   {prompt}")
     print(f"{'='*60}\n")
@@ -98,6 +100,8 @@ async def run_workflow(paci_path: str, material_path: str, prompt: str = "", use
             "critica_previa": "",  # vacío en la primera iteración
             "hitl_feedback_a1": "",   # feedback para AnalizadorPACI
             "hitl_feedback_a2": "",   # feedback para Adaptador
+            "school_id": school_id,
+            "materiales_referencia": "",  # se setea en agent.py tras AnalizadorPACI
         },
     )
 
@@ -164,7 +168,7 @@ async def run_workflow(paci_path: str, material_path: str, prompt: str = "", use
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        print("Uso: python run.py <paci_path> <material_path> [prompt_adicional] [user_id]")
+        print("Uso: python run.py <paci_path> <material_path> [prompt_adicional] [user_id] [school_id]")
         sys.exit(1)
 
     paci_path = sys.argv[1]
@@ -172,5 +176,6 @@ if __name__ == "__main__":
     prompt_adicional = sys.argv[3] if len(sys.argv) > 3 else ""
     # Desde CLI el user_id es opcional; si se omite, run_workflow genera un UUID.
     user_id_arg = sys.argv[4] if len(sys.argv) > 4 else ""
+    school_id_arg = sys.argv[5] if len(sys.argv) > 5 else ""
 
-    asyncio.run(run_workflow(paci_path, material_path, prompt_adicional, user_id_arg))
+    asyncio.run(run_workflow(paci_path, material_path, prompt_adicional, user_id_arg, school_id_arg))
