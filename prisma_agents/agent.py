@@ -32,6 +32,8 @@ from agents.analizador_paci import make_analizador_paci_agent
 from agents.adaptador import make_adaptador_agent
 from agents.generador_rubrica import make_generador_rubrica_agent
 from agents.critico import make_critico_agent
+from utils.curriculum_catalog import normalize_subject, normalize_grade
+from tools.book_repository import get_reference_materials
 
 _genai_client: genai.Client | None = None
 
@@ -41,6 +43,19 @@ def _get_genai_client() -> genai.Client:
     if _genai_client is None:
         _genai_client = genai.Client()
     return _genai_client
+
+
+def _extract_subject_grade(perfil_paci: str) -> tuple[str, str]:
+    """Extrae ramo y curso del bloque ---METADATOS--- generado por AnalizadorPACI."""
+    block_match = re.search(
+        r'---METADATOS---(.*?)---FIN_METADATOS---', perfil_paci, re.DOTALL
+    )
+    block = block_match.group(1) if block_match else perfil_paci
+    ramo_match = re.search(r'RAMO:\s*(.+)', block)
+    curso_match = re.search(r'CURSO:\s*(.+)', block)
+    subject_raw = ramo_match.group(1).strip() if ramo_match else ""
+    grade_raw = curso_match.group(1).strip() if curso_match else ""
+    return subject_raw, grade_raw
 
 
 _CLASSIFY_PROMPT = (
@@ -196,6 +211,33 @@ class PaciWorkflowAgent(BaseAgent):
             yield event
         if ctx.session.state.get("status") == "timeout":
             return
+
+        # ── Book Repository: materiales de referencia del establecimiento ────
+        perfil_paci = ctx.session.state.get("perfil_paci", "")
+        subject_raw, grade_raw = _extract_subject_grade(perfil_paci)
+        school_id = ctx.session.state.get("school_id", "")
+        subject = normalize_subject(subject_raw) if subject_raw else None
+        grade = normalize_grade(grade_raw) if grade_raw else None
+
+        materiales_texto = ""
+        if school_id and subject and grade:
+            print(f"\n[BookRepository] Buscando materiales: {subject}/{grade} — colegio {school_id}...\n")
+            raw = get_reference_materials(school_id, subject, grade, perfil_paci)
+            if raw:
+                # Envuelve con encabezado y etiqueta de seguridad para que el LLM identifique la sección
+                materiales_texto = (
+                    "### MATERIALES DE REFERENCIA DEL ESTABLECIMIENTO:\n"
+                    "<documento_usuario tipo=\"materiales_referencia\">\n"
+                    f"{raw}\n"
+                    "</documento_usuario>"
+                )
+                print("  ✓ Materiales de referencia cargados.\n")
+            else:
+                print("  ℹ Sin materiales disponibles para este ramo/curso.\n")
+        else:
+            print("\n[BookRepository] Sin school_id o ramo/curso no reconocido — omitiendo materiales.\n")
+
+        ctx.session.state["materiales_referencia"] = materiales_texto
 
         # ── Loop HITL: Agente 2 + aprobación del profesor ────────────────────
         for hitl_attempt in range(1, MAX_HITL_ITERATIONS + 1):

@@ -108,7 +108,14 @@ REGLA CRÍTICA: NO incluyas saludos, introducciones, ni comentarios conversacion
 (ej. '¡Por supuesto!', 'Aquí tienes el análisis...'). Entrega EXCLUSIVAMENTE el \
 contenido solicitado usando los encabezados indicados.
 
-{hitl_feedback_a1}"""
+{hitl_feedback_a1}
+
+Al finalizar tu análisis, agrega siempre esta sección con exactamente este formato \
+(sin modificar los marcadores):
+---METADATOS---
+RAMO: <nombre de la asignatura del estudiante, ej: Matemáticas>
+CURSO: <nivel del estudiante, ej: 5° Básico>
+---FIN_METADATOS---"""
 
 def make_analizador_paci_agent() -> LlmAgent:
     return LlmAgent(
