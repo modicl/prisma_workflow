@@ -9,7 +9,7 @@ Mapea texto libre extraído del PACI a los valores canónicos usados en S3:
 import unicodedata
 
 GRADE_ALIASES: dict[str, list[str]] = {
-    "1basico": ["1° básico", "primero básico", "1ro básico", "primer año básico", "1º básico", "1ero básico", "primer año"],
+    "1basico": ["1° básico", "primero básico", "1ro básico", "primer año básico", "1º básico", "1ero básico"],
     "2basico": ["2° básico", "segundo básico", "2do básico", "2º básico", "segundo año básico"],
     "3basico": ["3° básico", "tercero básico", "3ro básico", "3º básico", "tercer año básico"],
     "4basico": ["4° básico", "cuarto básico", "4to básico", "4º básico", "cuarto año básico"],
@@ -26,7 +26,7 @@ GRADE_ALIASES: dict[str, list[str]] = {
 SUBJECT_ALIASES: dict[str, list[str]] = {
     "matematica":         ["matemáticas", "matemática", "mate", "math", "matematicas", "matematica"],
     "lenguaje":           ["lenguaje y comunicación", "lenguaje y comunicacion", "lenguaje", "castellano", "lengua y literatura"],
-    "ciencias_naturales": ["ciencias naturales", "ciencias", "biología", "biologia", "cc. naturales"],
+    "ciencias_naturales": ["ciencias naturales", "biología", "biologia", "cc. naturales"],
     "historia":           ["historia, geografía y cs. sociales", "historia, geografia y cs. sociales", "historia", "cs. sociales", "ciencias sociales", "historia y geografía", "historia y geografia"],
     "educacion_fisica":   ["educación física", "educacion fisica", "ed. física", "ed. fisica", "deportes", "ef"],
     "ingles":             ["inglés", "ingles", "english"],

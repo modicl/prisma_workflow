@@ -63,3 +63,11 @@ def test_normalize_subject_unknown_returns_none():
 
 def test_normalize_subject_case_insensitive():
     assert normalize_subject("MATEMÁTICAS") == "matematica"
+
+
+def test_normalize_subject_ciencias_sociales_is_historia():
+    assert normalize_subject("ciencias sociales") == "historia"
+
+
+def test_normalize_grade_primer_año_medio_is_1medio():
+    assert normalize_grade("primer año medio") == "1medio"
