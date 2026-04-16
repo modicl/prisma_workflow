@@ -58,9 +58,20 @@ Se te proporciona:
 
 {critica_previa}
 
+{materiales_referencia}
+
 Tu tarea es generar una rúbrica de evaluación adaptada:
 
 ## Requisitos de la Rúbrica
+
+### 0. Materiales de Referencia del Establecimiento
+Si se proporcionan materiales de referencia (sección "MATERIALES DE REFERENCIA DEL \
+ESTABLECIMIENTO"), úsalos para:
+- Mantener coherencia con el lenguaje y los tipos de ejercicios que el estudiante ya conoce
+- Basar las actividades de la rúbrica en ejercicios del material (no inventar desde cero)
+- Verificar que los OA que adaptas corresponden al nivel del curso
+Los materiales son de apoyo — el PACI y la planificación adaptada tienen prioridad. \
+Si la sección está vacía, ignórala y genera la rúbrica normalmente.
 
 ### 1. Coherencia con el PACI (D83/2015 Art. 4)
 - Los criterios deben alinearse con los OA priorizados o modificados del PACI \
