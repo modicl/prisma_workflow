@@ -47,8 +47,12 @@ def _get_genai_client() -> genai.Client:
 
 def _extract_subject_grade(perfil_paci: str) -> tuple[str, str]:
     """Extrae ramo y curso del bloque ---METADATOS--- generado por AnalizadorPACI."""
-    ramo_match = re.search(r'RAMO:\s*(.+)', perfil_paci)
-    curso_match = re.search(r'CURSO:\s*(.+)', perfil_paci)
+    block_match = re.search(
+        r'---METADATOS---(.*?)---FIN_METADATOS---', perfil_paci, re.DOTALL
+    )
+    block = block_match.group(1) if block_match else perfil_paci
+    ramo_match = re.search(r'RAMO:\s*(.+)', block)
+    curso_match = re.search(r'CURSO:\s*(.+)', block)
     subject_raw = ramo_match.group(1).strip() if ramo_match else ""
     grade_raw = curso_match.group(1).strip() if curso_match else ""
     return subject_raw, grade_raw

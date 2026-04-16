@@ -78,11 +78,12 @@ def transcribe_pdf_from_s3(school_id: str, subject: str, grade: str, filename: s
     client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY"))
 
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-        s3.download_fileobj(_get_bucket(), key, tmp)
         tmp_path = tmp.name
 
     uploaded = None
     try:
+        with open(tmp_path, "wb") as f:
+            s3.download_fileobj(_get_bucket(), key, f)
         with open(tmp_path, "rb") as f:
             uploaded = client.files.upload(
                 file=f,
