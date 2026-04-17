@@ -87,7 +87,7 @@ def test_read_index_404_returns_none():
     assert result is None
 
 
-from tools.book_repository import select_materials_with_llm, get_reference_materials, transcribe_pdf_from_s3
+from tools.book_repository import select_materials_with_llm, get_reference_materials, transcribe_material_from_s3, transcribe_pdf_from_s3
 
 
 def test_select_materials_returns_llm_choice():
@@ -141,7 +141,7 @@ def test_get_reference_materials_filters_unlisted_filenames():
     with patch("tools.book_repository.read_index", return_value=SAMPLE_INDEX), \
          patch("tools.book_repository.select_materials_with_llm",
                return_value=["../../etc/passwd", "mat1.pdf"]), \
-         patch("tools.book_repository.transcribe_pdf_from_s3",
+         patch("tools.book_repository.transcribe_material_from_s3",
                return_value="contenido mat1") as mock_tx:
         result = get_reference_materials("school_x", "matematica", "5basico", "perfil")
     # Solo mat1.pdf pasa la validación; ../../etc/passwd no está en el índice
@@ -155,8 +155,8 @@ def test_get_reference_materials_s3_error_returns_empty():
     assert result == ""
 
 
-def test_transcribe_pdf_from_s3_happy_path_and_cleanup():
-    """Verifica el happy path y que el finally limpia temp file y archivo Gemini."""
+def test_transcribe_material_pdf_happy_path_and_cleanup():
+    """Verifica el happy path con PDF y que el finally limpia temp file y archivo Gemini."""
     mock_s3 = MagicMock()
     mock_uploaded_file = MagicMock()
     mock_uploaded_file.name = "files/abc123"
@@ -172,13 +172,43 @@ def test_transcribe_pdf_from_s3_happy_path_and_cleanup():
          patch("tools.book_repository.genai.Client", return_value=mock_client), \
          patch("tools.book_repository.os.unlink") as mock_unlink, \
          patch.dict(os.environ, {"S3_BUCKET_NAME": "prisma-schools-repos"}):
-        result = transcribe_pdf_from_s3("school_x", "matematica", "5basico", "mat1.pdf")
+        result = transcribe_material_from_s3("school_x", "matematica", "5basico", "mat1.pdf")
 
     assert result == "=== mat1.pdf ===\nContenido del PDF transcrito"
-    # Verifica cleanup: el archivo Gemini fue eliminado
+    upload_call = mock_client.files.upload.call_args
+    assert upload_call.kwargs["config"]["mime_type"] == "application/pdf"
     mock_client.files.delete.assert_called_once_with(name="files/abc123")
-    # Verifica cleanup: el archivo temporal fue eliminado
     mock_unlink.assert_called_once()
+
+
+def test_transcribe_material_docx_uses_correct_mime_type():
+    """Verifica que un .docx usa el mime type de Word, no de PDF."""
+    mock_s3 = MagicMock()
+    mock_uploaded_file = MagicMock()
+    mock_uploaded_file.name = "files/xyz"
+
+    mock_response = MagicMock()
+    mock_response.text = "Contenido del Word transcrito"
+
+    mock_client = MagicMock()
+    mock_client.files.upload.return_value = mock_uploaded_file
+    mock_client.models.generate_content.return_value = mock_response
+
+    with patch("tools.book_repository._get_s3_client", return_value=mock_s3), \
+         patch("tools.book_repository.genai.Client", return_value=mock_client), \
+         patch("tools.book_repository.os.unlink"), \
+         patch.dict(os.environ, {"S3_BUCKET_NAME": "prisma-schools-repos"}):
+        result = transcribe_material_from_s3("school_x", "lenguaje", "5basico", "guia.docx")
+
+    assert result == "=== guia.docx ===\nContenido del Word transcrito"
+    upload_call = mock_client.files.upload.call_args
+    assert upload_call.kwargs["config"]["mime_type"] == \
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+
+def test_transcribe_pdf_from_s3_alias_still_works():
+    """El alias transcribe_pdf_from_s3 sigue funcionando para compatibilidad."""
+    assert transcribe_pdf_from_s3 is transcribe_material_from_s3
 
 
 def test_get_reference_materials_empty_perfil_paci():

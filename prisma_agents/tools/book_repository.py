@@ -71,13 +71,27 @@ def select_materials_with_llm(index: dict, perfil_paci: str) -> list[str]:
     return []
 
 
-def transcribe_pdf_from_s3(school_id: str, subject: str, grade: str, filename: str) -> str:
-    """Descarga un PDF de S3 y lo transcribe usando Gemini Files API."""
+_MIME_TYPES = {
+    ".pdf":  "application/pdf",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".doc":  "application/msword",
+}
+
+
+def _mime_type_for(filename: str) -> str:
+    ext = os.path.splitext(filename)[1].lower()
+    return _MIME_TYPES.get(ext, "application/octet-stream")
+
+
+def transcribe_material_from_s3(school_id: str, subject: str, grade: str, filename: str) -> str:
+    """Descarga un material de S3 (PDF o Word) y lo transcribe usando Gemini Files API."""
     s3 = _get_s3_client()
     key = f"schools/{school_id}/{subject}/{grade}/{filename}"
     client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY"))
+    suffix = os.path.splitext(filename)[1].lower() or ".bin"
+    mime_type = _mime_type_for(filename)
 
-    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         tmp_path = tmp.name
 
     uploaded = None
@@ -87,7 +101,7 @@ def transcribe_pdf_from_s3(school_id: str, subject: str, grade: str, filename: s
         with open(tmp_path, "rb") as f:
             uploaded = client.files.upload(
                 file=f,
-                config={"mime_type": "application/pdf", "display_name": filename},
+                config={"mime_type": mime_type, "display_name": filename},
             )
         response = client.models.generate_content(
             model="gemini-2.5-flash-lite",
@@ -108,6 +122,10 @@ def transcribe_pdf_from_s3(school_id: str, subject: str, grade: str, filename: s
             os.unlink(tmp_path)
         except Exception:
             pass
+
+
+# Alias de compatibilidad
+transcribe_pdf_from_s3 = transcribe_material_from_s3
 
 
 def get_reference_materials(
@@ -135,7 +153,7 @@ def get_reference_materials(
         selected = [f for f in selected if f in valid_filenames][:3]
 
         texts = [
-            transcribe_pdf_from_s3(school_id, subject, grade, fn)
+            transcribe_material_from_s3(school_id, subject, grade, fn)
             for fn in selected
         ]
         return "\n\n".join(texts)
