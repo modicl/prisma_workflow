@@ -14,6 +14,15 @@ def test_hitl_response_queue_is_asyncio_queue():
     sd = SessionData()
     assert isinstance(sd.hitl_response_queue, asyncio.Queue)
 
-def test_global_dicts_exist():
-    assert isinstance(SESSIONS, dict)
-    assert isinstance(HITL_CALLBACKS, dict)
+def test_sessions_dict_accepts_session_data():
+    sd = SessionData()
+    SESSIONS["test-fix-123"] = sd
+    assert SESSIONS["test-fix-123"] is sd
+    assert "test-fix-123" not in HITL_CALLBACKS
+    del SESSIONS["test-fix-123"]
+
+
+def test_each_session_gets_independent_queue():
+    sd1 = SessionData()
+    sd2 = SessionData()
+    assert sd1.hitl_response_queue is not sd2.hitl_response_queue

@@ -1,6 +1,6 @@
 import asyncio
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Awaitable, Callable, Optional
 
 @dataclass
 class SessionData:
@@ -12,5 +12,7 @@ class SessionData:
     docx_path: Optional[str] = None
     error: Optional[str] = None
 
+HitlCallback = Callable[[dict, int, int], Awaitable[tuple[bool, str, int]]]
+
 SESSIONS: dict[str, SessionData] = {}
-HITL_CALLBACKS: dict[str, object] = {}
+HITL_CALLBACKS: dict[str, HitlCallback] = {}
