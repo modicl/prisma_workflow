@@ -92,27 +92,31 @@ def _load_pdf(path: Path, label: str | None) -> str:
             model="gemini-2.5-flash-lite",
             contents=[
                 uploaded,
-                "Extrae y transcribe el texto completo de este documento, "
-                "manteniendo la estructura de secciones y párrafos. "
-                "No omitas ningún campo ni tabla.",
+                "Este documento puede ser un PDF escaneado o con formularios. "
+                "Usa OCR si es necesario. "
+                "Extrae y transcribe TODO el texto visible: párrafos, tablas, cuadros, "
+                "encabezados, pies de página y cualquier campo de formulario. "
+                "No omitas nada aunque el texto sea pequeño o esté en una imagen.",
             ],
         )
     finally:
-        # Eliminar el archivo subido independientemente del resultado.
-        # Google retiene archivos 48 h si no se borran explícitamente.
         print(f"  → Eliminando archivo de la nube...")
         client.files.delete(name=uploaded.name)
 
-    # Añadimos una cabecera para que cuando el agente ADK lea este megatexto del estado (state)
-    # sepa visualmente de qué archivo proviene.
-    if not response.text:
+    # Intentar extraer texto de response.text o de los parts del candidato
+    extracted = response.text
+    if not extracted and response.candidates:
+        parts = response.candidates[0].content.parts
+        extracted = "".join(p.text for p in parts if hasattr(p, "text") and p.text)
+
+    if not extracted:
         raise ValueError(
             f"Gemini no pudo extraer texto de '{path.name}'. "
-            "El PDF puede estar escaneado sin OCR o tener contenido bloqueado. "
-            "Intenta con un PDF con texto seleccionable o conviértelo a .docx."
+            "El PDF puede tener calidad de escaneo muy baja o estar protegido con contraseña. "
+            "Intenta exportarlo como .docx desde Word/Acrobat e intenta de nuevo."
         )
     prefix = f"[Documento PDF: {label or path.name}]\n\n" if label else f"[{path.name}]\n\n"
-    text = prefix + response.text
+    text = prefix + extracted
     print(f"  ✓ {label or path.name} cargado ({len(text):,} caracteres)")
     return text
 
@@ -125,36 +129,37 @@ def _load_doc_via_gemini(path: Path, label: str | None) -> str:
     )
 
 
+def _extract_docx_text(path: str | Path) -> str:
+    """
+    Extrae todo el texto de un .docx leyendo directamente los elementos <w:t> del XML.
+
+    A diferencia de doc.paragraphs, este método captura también cuadros de texto
+    (w:txbxContent), tablas y encabezados/pies de página que python-docx omite.
+    """
+    import zipfile
+    from xml.etree import ElementTree as ET
+
+    W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    texts: list[str] = []
+
+    with zipfile.ZipFile(str(path)) as z:
+        # word/document.xml contiene el cuerpo principal; headers/footers/text boxes incluidos
+        xml_files = [n for n in z.namelist() if n.startswith("word/") and n.endswith(".xml")]
+        for xml_name in xml_files:
+            root = ET.fromstring(z.read(xml_name))
+            for elem in root.iter(f"{{{W}}}t"):
+                if elem.text and elem.text.strip():
+                    texts.append(elem.text)
+
+    return "\n".join(texts)
+
+
 def _load_docx(path: Path, label: str | None) -> str:
     """
-    Rutina específica para la extracción de texto en documentos Microsoft Word (.docx).
-    
-    Utiliza la librería python-docx (`docx`) para iterar por cada párrafo del documento,
-    bypaseando todo el ruido visual del XML y obteniendo solo el texto legible. De esta 
-    forma ahorramos llamadas innecesarias (y lentas) a la API multimodales de Google, ya que 
-    el texto XML de `.docx` es infinitamente más limpio y fácil de extraer localmente que un PDF.
-    
-    Args:
-        path (Path): Objeto Path apuntando a un doc/docx.
-        label (str | None): Etiqueta de cabecera.
+    Extrae texto de un .docx incluyendo cuadros de texto, tablas y encabezados.
+    Usa parseo XML directo para no depender de doc.paragraphs (que omite text boxes).
     """
-    try:
-        from docx import Document
-    except ImportError:
-        # Import local (lazy import) para no crashear el sistema entero si no
-        # se está usando la dependencia docx y no está instalada.
-        raise ImportError("Instala python-docx: pip install python-docx")
-
-    # Parsear el documento ZIP xml de wrod
-    doc = Document(str(path))
-    
-    # Extraer solamente los párrafos que contienen texto (excluyendo imágenes o espacios en blanco residuales)
-    paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
-    
-    # Unir todo el texto con saltos de línea para reconstituir el bloque original
-    text = "\n".join(paragraphs)
-
-    # Como siempre, anteponer una etiqueta amigable para la IA
+    text = _extract_docx_text(path)
     prefix = f"[Documento DOCX: {label or path.name}]\n\n" if label else f"[{path.name}]\n\n"
     return prefix + text
 
