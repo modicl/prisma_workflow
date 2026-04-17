@@ -35,8 +35,10 @@ def read_index(school_id: str, subject: str, grade: str) -> dict | None:
     """Lee index.json desde S3. Retorna None si no existe o hay error."""
     s3 = _get_s3_client()
     key = f"schools/{school_id}/{subject}/{grade}/index.json"
+    bucket = _get_bucket()
+    print(f"[BookRepository] S3 lookup → bucket={bucket!r}  key={key!r}")
     try:
-        response = s3.get_object(Bucket=_get_bucket(), Key=key)
+        response = s3.get_object(Bucket=bucket, Key=key)
         return json.loads(response["Body"].read().decode("utf-8"))
     except ClientError as e:
         code = e.response["Error"]["Code"]
@@ -84,40 +86,51 @@ def _mime_type_for(filename: str) -> str:
 
 
 def transcribe_material_from_s3(school_id: str, subject: str, grade: str, filename: str) -> str:
-    """Descarga un material de S3 (PDF o Word) y lo transcribe usando Gemini Files API."""
+    """Descarga un material de S3 y lo transcribe. PDF → Gemini Files API; DOCX → python-docx local."""
     s3 = _get_s3_client()
     key = f"schools/{school_id}/{subject}/{grade}/{filename}"
-    client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY"))
     suffix = os.path.splitext(filename)[1].lower() or ".bin"
-    mime_type = _mime_type_for(filename)
 
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         tmp_path = tmp.name
 
-    uploaded = None
     try:
         with open(tmp_path, "wb") as f:
-            s3.download_fileobj(_get_bucket(), key, f)
-        with open(tmp_path, "rb") as f:
-            uploaded = client.files.upload(
-                file=f,
-                config={"mime_type": mime_type, "display_name": filename},
+            print(f"[BookRepository] descargando → bucket={_get_bucket()!r}  key={key!r}")
+            response_s3 = s3.get_object(Bucket=_get_bucket(), Key=key)
+            f.write(response_s3["Body"].read())
+
+        if suffix == ".docx":
+            from docx import Document
+            doc = Document(tmp_path)
+            text = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+            return f"=== {filename} ===\n{text}"
+
+        # PDF y otros formatos soportados → Gemini Files API
+        client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY"))
+        uploaded = None
+        try:
+            with open(tmp_path, "rb") as f:
+                uploaded = client.files.upload(
+                    file=f,
+                    config={"mime_type": _mime_type_for(filename), "display_name": filename},
+                )
+            response = client.models.generate_content(
+                model="gemini-2.5-flash-lite",
+                contents=[
+                    uploaded,
+                    "Extrae y transcribe el texto completo de este material educativo. "
+                    "Preserva la estructura, títulos, ejercicios y ejemplos.",
+                ],
             )
-        response = client.models.generate_content(
-            model="gemini-2.5-flash-lite",
-            contents=[
-                uploaded,
-                "Extrae y transcribe el texto completo de este material educativo. "
-                "Preserva la estructura, títulos, ejercicios y ejemplos.",
-            ],
-        )
-        return f"=== {filename} ===\n{response.text}"
+            return f"=== {filename} ===\n{response.text}"
+        finally:
+            if uploaded:
+                try:
+                    client.files.delete(name=uploaded.name)
+                except Exception:
+                    pass
     finally:
-        if uploaded:
-            try:
-                client.files.delete(name=uploaded.name)
-            except Exception:
-                pass
         try:
             os.unlink(tmp_path)
         except Exception:
