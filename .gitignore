@@ -10,5 +10,7 @@ docs_test/
 .pytest_cache/
 **/.pytest_cache/
 
+prisma_agents/token_reports/
+
 *.pdf
 *.docx
