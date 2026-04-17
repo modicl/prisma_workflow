@@ -14,6 +14,15 @@ router = APIRouter(prefix="/chat")
 UPLOAD_DIR = Path("/tmp/prisma_uploads")
 UPLOAD_DIR.mkdir(exist_ok=True)
 
+_ALLOWED_EXTENSIONS = {".pdf", ".docx", ".doc"}
+
+
+def _safe_ext(filename: str | None, default: str) -> str:
+    if not filename:
+        return default
+    suffix = Path(filename).suffix.lower()
+    return suffix if suffix in _ALLOWED_EXTENSIONS else default
+
 
 class HitlResponseBody(BaseModel):
     approved: bool
@@ -21,7 +30,11 @@ class HitlResponseBody(BaseModel):
     agent_to_retry: Optional[int] = None
 
 
-@router.post("/start")
+class StartChatResponse(BaseModel):
+    session_id: str
+
+
+@router.post("/start", response_model=StartChatResponse, status_code=201)
 async def start_chat(
     background_tasks: BackgroundTasks,
     paci_file: UploadFile = File(...),
@@ -31,14 +44,19 @@ async def start_chat(
 ):
     session_id = str(uuid.uuid4())
 
-    paci_ext = Path(paci_file.filename).suffix if paci_file.filename else ".pdf"
-    material_ext = Path(material_file.filename).suffix if material_file.filename else ".docx"
+    paci_ext = _safe_ext(paci_file.filename, ".pdf")
+    material_ext = _safe_ext(material_file.filename, ".docx")
 
     paci_path = UPLOAD_DIR / f"{session_id}_paci{paci_ext}"
     material_path = UPLOAD_DIR / f"{session_id}_material{material_ext}"
 
-    paci_path.write_bytes(await paci_file.read())
-    material_path.write_bytes(await material_file.read())
+    try:
+        paci_path.write_bytes(await paci_file.read())
+        material_path.write_bytes(await material_file.read())
+    except Exception:
+        paci_path.unlink(missing_ok=True)
+        material_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail="Error al guardar los archivos subidos")
 
     SESSIONS[session_id] = SessionData()
 
@@ -89,6 +107,8 @@ async def download_result(session_id: str):
     sd = SESSIONS[session_id]
     if sd.phase != "completed" or not sd.docx_path:
         raise HTTPException(status_code=404, detail="Resultado no disponible aún")
+    if not Path(sd.docx_path).exists():
+        raise HTTPException(status_code=404, detail="Archivo no encontrado en disco")
     return FileResponse(
         sd.docx_path,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
