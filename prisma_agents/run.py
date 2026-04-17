@@ -54,7 +54,7 @@ def _save_token_report(session_id: str, tracker: SessionTokenUsage, status: str)
 APP_NAME = "paci_workflow"
 
 
-async def run_workflow(paci_path: str, material_path: str, prompt: str = "", user_id: str = "", school_id: str = "") -> dict:
+async def run_workflow(paci_path: str, material_path: str, prompt: str = "", user_id: str = "", school_id: str = "", api_session_id: str = "") -> dict:
     """Ejecuta el flujo multi-agente PACI y retorna los resultados.
 
     Args:
@@ -103,6 +103,7 @@ async def run_workflow(paci_path: str, material_path: str, prompt: str = "", use
             "school_id": school_id,
             "materiales_referencia": "",  # se setea en agent.py tras AnalizadorPACI
             "prompt_docente": prompt,
+            "api_session_id": api_session_id,
         },
     )
 
@@ -138,6 +139,7 @@ async def run_workflow(paci_path: str, material_path: str, prompt: str = "", use
         "perfil_paci": state.get("perfil_paci", ""),
         "planificacion_adaptada": state.get("planificacion_adaptada", ""),
         "rubrica_final": state.get("rubrica", ""),
+        "docx_path": None,
     }
 
     # Persistir reporte de tokens
@@ -150,6 +152,7 @@ async def run_workflow(paci_path: str, material_path: str, prompt: str = "", use
         base_name = os.path.basename(material_path).split('.')[0]
         output_name = f"rubrica_adaptada_{base_name}.docx"
         docx_path = export_results_to_docx(results, output_filename=output_name)
+        results["docx_path"] = str(docx_path)
     except Exception as e:
         print(f"  x Error al exportar a DOCX: {e}\n")
 
