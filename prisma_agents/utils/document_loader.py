@@ -112,42 +112,11 @@ def _load_pdf(path: Path, label: str | None) -> str:
 
 
 def _load_doc_via_gemini(path: Path, label: str | None) -> str:
-    """Carga un .doc (binario Word 97-2003) enviándolo a Gemini Files API.
-
-    python-docx no soporta el formato binario .doc, así que se delega
-    la extracción al mismo pipeline multimodal que usa _load_pdf.
-    """
-    import os
-    from google import genai
-
-    client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY"))
-
-    print(f"  → Subiendo {label or path.name} a Google Files API (formato .doc)...")
-    with open(path, "rb") as f:
-        uploaded = client.files.upload(
-            file=f,
-            config={"mime_type": "application/msword", "display_name": path.name},
-        )
-
-    print(f"  → Transcribiendo con Gemini...         (puede tardar 20-60s)")
-    try:
-        response = client.models.generate_content(
-            model="gemini-2.5-flash-lite",
-            contents=[
-                uploaded,
-                "Extrae y transcribe el texto completo de este documento, "
-                "manteniendo la estructura de secciones y párrafos. "
-                "No omitas ningún campo ni tabla.",
-            ],
-        )
-    finally:
-        print(f"  → Eliminando archivo de la nube...")
-        client.files.delete(name=uploaded.name)
-
-    prefix = f"[Documento DOC: {label or path.name}]\n\n" if label else f"[{path.name}]\n\n"
-    text = prefix + response.text
-    print(f"  ✓ {label or path.name} cargado ({len(text):,} caracteres)")
-    return text
+    """Intenta cargar un .doc; falla con mensaje claro si el formato no es soportado."""
+    raise ValueError(
+        f"El archivo '{path.name}' está en formato .doc (Word 97-2003), que no es compatible.\n"
+        "Por favor guárdalo como .docx (Archivo → Guardar como → Word (.docx)) o como .pdf e intenta de nuevo."
+    )
 
 
 def _load_docx(path: Path, label: str | None) -> str:
