@@ -214,10 +214,17 @@ class PaciWorkflowAgent(BaseAgent):
 
         # ── Book Repository: materiales de referencia del establecimiento ────
         perfil_paci = ctx.session.state.get("perfil_paci", "")
+        prompt_docente = ctx.session.state.get("prompt_docente", "")
         subject_raw, grade_raw = _extract_subject_grade(perfil_paci)
         school_id = ctx.session.state.get("school_id", "")
         subject = normalize_subject(subject_raw) if subject_raw else None
         grade = normalize_grade(grade_raw) if grade_raw else None
+
+        # Fallback: si el PACI no dio ramo o curso, intentar desde el prompt del docente
+        if not subject and prompt_docente:
+            subject = normalize_subject(prompt_docente)
+        if not grade and prompt_docente:
+            grade = normalize_grade(prompt_docente)
 
         materiales_texto = ""
         if school_id and subject and grade:

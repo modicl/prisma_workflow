@@ -102,6 +102,7 @@ async def run_workflow(paci_path: str, material_path: str, prompt: str = "", use
             "hitl_feedback_a2": "",   # feedback para Adaptador
             "school_id": school_id,
             "materiales_referencia": "",  # se setea en agent.py tras AnalizadorPACI
+            "prompt_docente": prompt,
         },
     )
 

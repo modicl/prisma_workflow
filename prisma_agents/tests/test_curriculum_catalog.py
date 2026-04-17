@@ -71,3 +71,29 @@ def test_normalize_subject_ciencias_sociales_is_historia():
 
 def test_normalize_grade_primer_año_medio_is_1medio():
     assert normalize_grade("primer año medio") == "1medio"
+
+
+# ── Tests de matching desde texto libre (prompt del docente como fallback) ──
+
+def test_normalize_subject_from_full_sentence():
+    assert normalize_subject("necesito rúbrica para matemáticas de 5to básico") == "matematica"
+
+
+def test_normalize_grade_from_full_sentence():
+    assert normalize_grade("necesito rúbrica para matemáticas de 5to básico") == "5basico"
+
+
+def test_normalize_subject_fallback_with_noise():
+    assert normalize_subject("el estudiante tiene TEA, trabaja lenguaje y comunicación") == "lenguaje"
+
+
+def test_normalize_grade_from_informal_prompt():
+    assert normalize_grade("genera rubrica para cuarto medio historia") == "4medio"
+
+
+def test_normalize_subject_none_when_not_in_prompt():
+    assert normalize_subject("necesito una rúbrica adaptada para el estudiante") is None
+
+
+def test_normalize_grade_none_when_not_in_prompt():
+    assert normalize_grade("el estudiante tiene dificultades de lectura") is None
