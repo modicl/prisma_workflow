@@ -87,11 +87,16 @@ async def _hitl_checkpoint(
     if api_session_id:
         try:
             from api.session_store import HITL_CALLBACKS
+        except ImportError:
+            pass
+        else:
             callback = HITL_CALLBACKS.get(api_session_id)
             if callback:
                 return await callback(state, attempt, max_attempts)
-        except ImportError:
-            pass
+            raise RuntimeError(
+                f"HITL callback for session {api_session_id!r} not found. "
+                "Cannot fall back to CLI in API mode."
+            )
 
     # CLI fallback
     restantes = max_attempts - attempt
@@ -108,7 +113,7 @@ async def _hitl_checkpoint(
         print("\n⚠  Este es el último intento de revisión.")
     print("\n" + "─" * 60)
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     respuesta = await loop.run_in_executor(
         None, lambda: input("¿Aprueba el análisis y la planificación? ").strip()
     )
