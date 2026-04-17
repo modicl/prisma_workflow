@@ -15,7 +15,9 @@ async def run_workflow_for_api(
     prompt: str,
     school_id: str,
 ) -> None:
-    session_data = SESSIONS[session_id]
+    session_data = SESSIONS.get(session_id)
+    if session_data is None:
+        return
 
     async def hitl_callback(state: dict, attempt: int, max_attempts: int) -> tuple[bool, str, int]:
         session_data.hitl_data = {
@@ -70,6 +72,9 @@ async def run_workflow_for_api(
         })
     finally:
         HITL_CALLBACKS.pop(session_id, None)
+        if session_data is not None:
+            while not session_data.hitl_response_queue.empty():
+                session_data.hitl_response_queue.get_nowait()
         for path in [paci_path, material_path]:
             try:
                 os.remove(path)
