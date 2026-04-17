@@ -35,8 +35,10 @@ def read_index(school_id: str, subject: str, grade: str) -> dict | None:
     """Lee index.json desde S3. Retorna None si no existe o hay error."""
     s3 = _get_s3_client()
     key = f"schools/{school_id}/{subject}/{grade}/index.json"
+    bucket = _get_bucket()
+    print(f"[BookRepository] S3 lookup → bucket={bucket!r}  key={key!r}")
     try:
-        response = s3.get_object(Bucket=_get_bucket(), Key=key)
+        response = s3.get_object(Bucket=bucket, Key=key)
         return json.loads(response["Body"].read().decode("utf-8"))
     except ClientError as e:
         code = e.response["Error"]["Code"]
