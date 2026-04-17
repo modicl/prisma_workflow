@@ -105,6 +105,12 @@ def _load_pdf(path: Path, label: str | None) -> str:
 
     # Añadimos una cabecera para que cuando el agente ADK lea este megatexto del estado (state)
     # sepa visualmente de qué archivo proviene.
+    if not response.text:
+        raise ValueError(
+            f"Gemini no pudo extraer texto de '{path.name}'. "
+            "El PDF puede estar escaneado sin OCR o tener contenido bloqueado. "
+            "Intenta con un PDF con texto seleccionable o conviértelo a .docx."
+        )
     prefix = f"[Documento PDF: {label or path.name}]\n\n" if label else f"[{path.name}]\n\n"
     text = prefix + response.text
     print(f"  ✓ {label or path.name} cargado ({len(text):,} caracteres)")
