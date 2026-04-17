@@ -11,11 +11,17 @@ Construido con **Google ADK** y el modelo **Gemini 2.5 Flash Lite**.
 Dado el PACI de un estudiante y un material educativo base, el sistema ejecuta automáticamente el siguiente flujo:
 
 ```
-[PACI del alumno] + [Material base] + [Prompt opcional]
+[PACI del alumno] + [Material base] + [Prompt opcional] + [school_id]
                         ↓
         Agente 1 — AnalizadorPACI
-        Extrae NEE, perfil de aprendizaje, OA priorizados
-        y consideraciones de evaluación desde el PACI.
+        Extrae NEE, perfil de aprendizaje, OA priorizados,
+        consideraciones de evaluación, ramo y curso del estudiante.
+                        ↓
+        Repositorio de Materiales (S3)
+        Detecta ramo y curso automáticamente desde el perfil.
+        Consulta el índice del colegio en S3 y usa Gemini para
+        seleccionar los 3 materiales más relevantes para el perfil.
+        Transcribe y entrega el contenido al GeneradorRúbrica.
                         ↓
         ┌─────── CHECKPOINT HITL (máx. 6 intentos) ──────────┐
         │ Agente 2 — Adaptador                               │
@@ -33,8 +39,9 @@ Dado el PACI de un estudiante y un material educativo base, el sistema ejecuta a
                         ↓
         Agente 3 — GeneradorRúbrica  ←──────────────┐
         Genera una rúbrica de evaluación adaptada    │
-        con 4 niveles de desempeño y condiciones     │
-        de aplicación diferenciadas.                 │
+        usando los materiales del colegio como       │
+        referencia para alinear criterios y niveles  │
+        con lo que el docente usa en el aula.        │
                         ↓                            │
         Agente Crítico                               │
         Evalúa la rúbrica contra el Decreto 83/2015, │
@@ -68,10 +75,45 @@ Los agentes tienen conocimiento embebido de:
 
 ---
 
+## Repositorio de Materiales por Colegio
+
+Cada colegio puede mantener su propio repositorio de materiales educativos en AWS S3. Cuando el flujo se ejecuta con un `school_id`, el sistema:
+
+1. **Detecta el ramo y curso** automáticamente desde el análisis del PACI (o desde el prompt del docente como fallback), normalizando aliases en español ("Matemáticas", "mate", "5° Básico", "quinto básico" → keys estandarizadas).
+2. **Consulta el índice** del colegio en S3 (`schools/{school_id}/{ramo}/{curso}/index.json`), que lista los materiales disponibles con título, descripción y prioridad.
+3. **Selecciona los 3 más relevantes** usando Gemini, comparando el índice contra el perfil del estudiante.
+4. **Transcribe el contenido** de cada material (PDF vía Gemini Files API con OCR; DOCX via parseo XML local) y lo entrega al GeneradorRúbrica.
+
+**La ventaja clave:** la rúbrica generada no es genérica — se alinea con los materiales, ejercicios y ejemplos que el docente realmente usa en el aula. Si el colegio trabaja con guías de fracciones específicas, la rúbrica refleja exactamente ese enfoque.
+
+**Estructura del índice S3:**
+```json
+{
+  "school_id": "colegio_demo",
+  "subject": "matematica",
+  "grade": "5basico",
+  "materials": [
+    {
+      "filename": "guia_fracciones.pdf",
+      "title": "Cuadernillo fracciones",
+      "description": "Ejercicios de fracciones con contextos cotidianos",
+      "priority": 1,
+      "pages": 30,
+      "tags": ["fracciones", "OA3"]
+    }
+  ]
+}
+```
+
+> Si no se provee `school_id` o el colegio no tiene materiales para ese ramo/curso, el flujo continúa sin materiales de referencia (comportamiento anterior).
+
+---
+
 ## Requisitos
 
 - Python 3.10+
 - Una API Key de Google AI Studio ([obtener aquí](https://aistudio.google.com/app/apikey))
+- *(Opcional)* Credenciales AWS con permiso `s3:GetObject` sobre el bucket del repositorio de materiales
 
 ---
 
@@ -91,10 +133,16 @@ source venv/bin/activate
 # 3. Instalar dependencias
 pip install -r requirements.txt
 
-# 4. Configurar API Key
+# 4. Configurar variables de entorno
 # Editar el archivo .env:
 GOOGLE_GENAI_USE_VERTEXAI=0
 GOOGLE_API_KEY=tu_api_key_aqui
+
+# Opcional — solo si usas el repositorio de materiales S3:
+AWS_ACCESS_KEY_ID=tu_access_key
+AWS_SECRET_ACCESS_KEY=tu_secret_key
+AWS_REGION=us-east-1
+S3_BUCKET_NAME=prisma-schools-repos
 ```
 
 ---
@@ -102,15 +150,16 @@ GOOGLE_API_KEY=tu_api_key_aqui
 ## Uso
 
 ```bash
-python run.py <paci_path> <material_path> [prompt_adicional] [user_id]
+python run.py <paci_path> <material_path> [prompt_adicional] [user_id] [school_id]
 ```
 
-| Argumento          | Obligatorio | Descripción                                         |
-| ------------------ | ----------- | --------------------------------------------------- |
+| Argumento          | Obligatorio | Descripción                                            |
+| ------------------ | ----------- | ------------------------------------------------------ |
 | `paci_path`        | ✅           | Ruta al PACI del estudiante (`.pdf`, `.docx`, `.json`) |
-| `material_path`    | ✅           | Ruta al material educativo base (`.pdf`, `.docx`)   |
-| `prompt_adicional` | ❌           | Instrucción extra para los agentes                  |
-| `user_id`          | ❌           | ID del docente (se genera UUID automáticamente)     |
+| `material_path`    | ✅           | Ruta al material educativo base (`.pdf`, `.docx`)      |
+| `prompt_adicional` | ❌           | Instrucción extra para los agentes                     |
+| `user_id`          | ❌           | ID del docente (se genera UUID automáticamente)        |
+| `school_id`        | ❌           | ID del colegio para consultar repositorio S3           |
 
 ### Probar con los documentos de ejemplo
 
@@ -127,14 +176,22 @@ python run.py ../docs_test/paci_test.pdf ../docs_test/material_base_test.pdf "Fo
 
 # PACI en JSON + material en DOCX
 python run.py datos/paci_alumno.json datos/guia_matematicas.docx
+
+# Con repositorio de materiales del colegio
+python run.py datos/paci.pdf datos/material.docx "" "" "colegio_demo"
 ```
 
 ### Formatos soportados
 
-| Documento           | Formatos                 |
-| ------------------- | ------------------------ |
-| PACI del estudiante | `.pdf`, `.docx`, `.json` |
-| Material base       | `.pdf`, `.docx`          |
+| Documento                    | Formatos                 | Método de extracción                            |
+| ---------------------------- | ------------------------ | ----------------------------------------------- |
+| PACI del estudiante          | `.pdf`, `.docx`, `.json` | Gemini OCR / XML directo / JSON                 |
+| Material base                | `.pdf`, `.docx`          | Gemini OCR / XML directo                        |
+| Materiales de referencia S3  | `.pdf`, `.docx`          | Gemini OCR / XML directo                        |
+
+- **PDF**: se sube a la Gemini Files API con instrucción OCR explícita. Funciona tanto con PDFs de texto seleccionable como con documentos escaneados.
+- **DOCX**: se extrae texto iterando todos los elementos `<w:t>` del XML interno del archivo. Captura párrafos, **cuadros de texto**, tablas, encabezados y pies de página — incluso en documentos con formularios o layouts complejos que python-docx no lee correctamente.
+- **.doc (Word 97-2003)**: no soportado. Guardar como `.docx` o `.pdf`.
 
 > El formato `.json` es para PACI exportados desde formularios digitales (Google Forms, plataformas MINEDUC, etc.)
 
@@ -207,15 +264,18 @@ prisma_agents/
 ├── agent.py                  # Orquestador principal (PaciWorkflowAgent)
 ├── run.py                    # Script de ejecución CLI
 ├── requirements.txt
-├── .env                      # API Key (no subir a repositorio)
+├── .env                      # API Key + credenciales AWS (no subir a repositorio)
 ├── dashboard.py              # Script interactivo de reportes de consumo de tokens API
 ├── agents/
-│   ├── analizador_paci.py    # Agente 1: extrae perfil del PACI
+│   ├── analizador_paci.py    # Agente 1: extrae perfil del PACI (incluye ramo/curso)
 │   ├── adaptador.py          # Agente 2: adapta el material educativo
-│   ├── generador_rubrica.py  # Agente 3: genera la rúbrica
+│   ├── generador_rubrica.py  # Agente 3: genera la rúbrica (usa materiales S3)
 │   └── critico.py            # Agente Crítico: evalúa la rúbrica
+├── tools/
+│   └── book_repository.py   # Acceso S3: lee índice, selecciona y transcribe materiales
 └── utils/
-    ├── document_loader.py    # Carga PDF, DOCX y JSON a texto
+    ├── document_loader.py    # Carga PDF (Gemini OCR), DOCX (XML) y JSON a texto
+    ├── curriculum_catalog.py # Normaliza ramo/curso desde texto libre en español
     └── token_tracker.py      # Lógica de rastreo de tokens y uso por agente en el EventLoop
 ```
 
@@ -227,3 +287,5 @@ prisma_agents/
 - El Agente Crítico puede rechazar la rúbrica hasta **3 veces**. Si tras 3 intentos no es aprobada, se entrega la última versión generada.
 - Los PDF se procesan mediante la **API de Gemini Files**, lo que requiere conexión a internet y consume cuota de la API Key.
 - El estado de la sesión y el histórico de los tokens de cada agente se manejan con identificadores únicos (`user_id`), permitiendo persistir las ejecuciones multi-docente de forma aislada en PostgreSQL.
+- El repositorio S3 es de **solo lectura** para el agente. Nunca escribe ni modifica materiales.
+- Si el colegio no tiene materiales para el ramo/curso detectado, el flujo **continúa normalmente** sin interrupciones — el repositorio S3 es opcional y aditivo.
