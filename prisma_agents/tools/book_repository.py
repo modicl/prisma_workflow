@@ -101,10 +101,17 @@ def transcribe_material_from_s3(school_id: str, subject: str, grade: str, filena
             f.write(response_s3["Body"].read())
 
         if suffix == ".docx":
-            from docx import Document
-            doc = Document(tmp_path)
-            text = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
-            return f"=== {filename} ===\n{text}"
+            import zipfile
+            from xml.etree import ElementTree as ET
+            W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            texts: list[str] = []
+            with zipfile.ZipFile(tmp_path) as z:
+                for xml_name in [n for n in z.namelist() if n.startswith("word/") and n.endswith(".xml")]:
+                    root = ET.fromstring(z.read(xml_name))
+                    for elem in root.iter(f"{{{W}}}t"):
+                        if elem.text and elem.text.strip():
+                            texts.append(elem.text)
+            return f"=== {filename} ===\n" + "\n".join(texts)
 
         # PDF y otros formatos soportados → Gemini Files API
         client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY"))
