@@ -263,39 +263,59 @@ La rama `feature/ui-backend` incluye un prototipo funcional de la interfaz web. 
 
 ### Arquitectura
 
-El sistema implementa una **arquitectura event-driven** basada en tres servicios AWS más el backend del agente:
+El sistema implementa una **arquitectura event-driven** basada en tres servicios AWS más dos backends desacoplados:
 
 ```
-[Docente — Browser]
-        │  POST /chat/start (archivos + prompt)
-        ▼
-[FastAPI Backend — agente]
-  ├─ Escribe sesión en DynamoDB   (phase = "running")
-  ├─ Sube archivos a S3           (jobs/{session_id}/paci.pdf + material.pdf)
-  └─ Retorna { session_id }  ← el docente no espera nada más
-                                          │
-                                S3 PUT Event (automático)
-                                          ▼
-                               [AWS Lambda — trigger liviano]
-                                 Lee session_id del evento S3
-                                 Llama POST /internal/run/{session_id}
-                                          │
-                                 HTTP al backend del agente
-                                          ▼
-                               [FastAPI Backend — worker]
-                                 Descarga archivos desde S3
-                                 Corre PaciWorkflowAgent completo
-                                 En checkpoint HITL:
-                                   → escribe hitl_data en DynamoDB
-                                   → phase = "awaiting_hitl"
-                                   → espera respuesta del docente
-                                 Al completar:
-                                   → sube DOCX a S3 (results/)
-                                   → phase = "completed" en DynamoDB
+                  ┌─────────────────────────────────────┐
+                  │   MICROSERVICIO DE UPLOAD            │
+                  │   (desacoplado del agente)           │
+[Docente — Browser]─── POST /chat/start ──────────────▶ │
+                  │  ├─ Escribe sesión en DynamoDB       │
+                  │  ├─ Sube archivos a S3               │
+                  │  └─ Retorna { session_id }           │
+                  └─────────────────────────────────────┘
+                               │ < 1 segundo
+                               ▼
+                  S3 PUT Event (automático)
+                               │
+                               ▼
+                  [AWS Lambda — trigger liviano]
+                    Lee session_id del evento S3
+                    Llama POST /internal/run/{session_id}
+                               │
+                               ▼
+                  ┌─────────────────────────────────────┐
+                  │   BACKEND DEL AGENTE                 │
+                  │   Descarga archivos desde S3         │
+                  │   Corre PaciWorkflowAgent completo   │
+                  │   En checkpoint HITL:                │
+                  │     → escribe hitl_data en DynamoDB  │
+                  │     → phase = "awaiting_hitl"        │
+                  │     → espera respuesta del docente   │
+                  │   Al completar:                      │
+                  │     → sube DOCX a S3 (results/)      │
+                  │     → phase = "completed" en Dynamo  │
+                  └─────────────────────────────────────┘
 
 [Browser — polling GET /chat/{id}/state cada 2s]
   ← Lee estado desde DynamoDB
 ```
+
+**¿Por qué dos backends separados?**
+
+El microservicio de upload y el backend del agente tienen responsabilidades, ciclos de vida y requisitos de cómputo completamente distintos:
+
+| | Microservicio de upload | Backend del agente |
+|---|---|---|
+| **Responsabilidad** | Recibir archivos, escribir en DynamoDB, subir a S3 | Correr el flujo multi-agente, manejar HITL |
+| **Duración de request** | < 1 segundo | 5-15 minutos por sesión |
+| **Escala** | Escala horizontal fácilmente (stateless) | Stateful — mantiene `asyncio.Queue` por sesión |
+| **Cómputo** | Mínimo (I/O puro) | Intensivo (LLM calls, procesamiento de documentos) |
+| **Dependencias** | Solo boto3 + FastAPI | Google ADK, Gemini, todas las dependencias del agente |
+
+Desacoplarlos evita que una subida de archivos lenta o un spike de uploads afecte al agente en ejecución, y permite escalar o reemplazar cada servicio de forma independiente.
+
+> **En el prototipo actual** ambos corren en el mismo proceso FastAPI para simplificar el desarrollo. El contrato entre ellos es S3 + DynamoDB + el endpoint `/internal/run`, por lo que separarlos en producción no requiere cambiar ningún otro componente.
 
 **Servicios AWS utilizados:**
 
@@ -307,7 +327,7 @@ El sistema implementa una **arquitectura event-driven** basada en tres servicios
 
 **Ventaja clave de esta arquitectura:** el docente sube los archivos y recibe `session_id` en menos de 1 segundo. El procesamiento del agente (que puede durar 5-15 minutos) ocurre completamente en background, sin bloquear al usuario ni mantener una conexión HTTP abierta.
 
-FastAPI corre en el mismo contenedor que el agente. El frontend es una SPA React que se comunica vía REST.
+El frontend es una SPA React que se comunica vía REST.
 
 ### Cómo correrlo
 
