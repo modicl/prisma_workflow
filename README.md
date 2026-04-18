@@ -257,6 +257,76 @@ El contenido completo queda en el archivo `.docx` generado.
 
 ---
 
+## Prototipo de interfaz (UI)
+
+La rama `feature/ui-backend` incluye un prototipo funcional de la interfaz web. Su propósito es **visualizar el flujo completo** — cómo el docente interactúa con el agente — y servir como referencia de UX para quien deba implementar la interfaz en producción.
+
+### Arquitectura
+
+```
+React + Tailwind (puerto 5173)  ←→  FastAPI (puerto 8000)  ←→  PaciWorkflowAgent
+```
+
+FastAPI corre en el mismo proceso que el agente. El frontend es una SPA React que se comunica vía REST.
+
+### Cómo correrlo
+
+```bash
+# Backend (desde prisma_agents/)
+uvicorn api.main:app --port 8000 --reload
+
+# Frontend (desde frontend/)
+npm install
+npm run dev          # abre en http://localhost:5173
+```
+
+### Flujo de pantallas
+
+**Pantalla 1 — Carga de documentos**
+
+El docente sube el PACI del estudiante y el material base (PDF o DOCX), con un campo de prompt libre opcional. Al presionar "Iniciar" se llama `POST /chat/start` y la interfaz navega al chat.
+
+**Pantalla 2 — Chat con el agente**
+
+Muestra mensajes de progreso mientras el agente trabaja. Un spinner indica que el procesamiento está activo (polling cada 2 segundos al backend). Los mensajes aparecen en burbujas a medida que cada etapa del flujo completa.
+
+**Checkpoint HITL — Revisión del docente**
+
+Cuando el Agente 2 termina la adaptación, el flujo se pausa y se muestra una tarjeta de revisión con:
+- El análisis del PACI generado por el Agente 1 (en acordeón colapsable)
+- La planificación adaptada generada por el Agente 2 (en acordeón colapsable)
+- Botones **Aprobar** / **Rechazar**
+
+Si rechaza: el docente escribe el motivo y elige qué agente corregir (Agente 1 o Agente 2). El flujo se reanuda automáticamente con el feedback inyectado.
+
+**Pantalla final**
+
+Al completarse el flujo, aparece un botón para descargar la rúbrica adaptada en formato `.docx`.
+
+### Endpoints de la API
+
+Ver documentación completa en [`prisma_agents/api/README.md`](prisma_agents/api/README.md).
+
+| Endpoint | Descripción |
+|---|---|
+| `POST /chat/start` | Inicia sesión, lanza el agente en background |
+| `GET /chat/{id}/state` | Estado actual (fase, mensajes, datos HITL) |
+| `POST /chat/{id}/hitl` | Envía aprobación o rechazo del docente |
+| `GET /chat/{id}/download` | Descarga el `.docx` generado |
+| `GET /health` | Healthcheck |
+
+### Consideraciones para producción
+
+El prototipo deliberadamente omite aspectos que deberán resolverse en una implementación real:
+
+- **Autenticación:** no hay login ni control de acceso. En producción se requiere al menos autenticación por docente.
+- **Persistencia de sesiones:** las sesiones viven en memoria; un reinicio del servidor las pierde. En producción usar Redis u otro store persistente.
+- **Limpieza de sesiones:** las sesiones completadas nunca se eliminan del diccionario en memoria. En producción agregar TTL o limpieza periódica.
+- **Múltiples colegios:** `school_id` está fijo como `"colegio_demo"`. En producción debe ser configurable por docente o institución.
+- **Infraestructura:** frontend y backend separados en contenedores distintos, con un proxy inverso (nginx) sirviendo el frontend y enrutando `/chat/*` al backend.
+
+---
+
 ## Estructura del proyecto
 
 ```
@@ -266,6 +336,12 @@ prisma_agents/
 ├── requirements.txt
 ├── .env                      # API Key + credenciales AWS (no subir a repositorio)
 ├── dashboard.py              # Script interactivo de reportes de consumo de tokens API
+├── api/
+│   ├── main.py               # FastAPI app principal
+│   ├── chat_router.py        # Endpoints /chat/*
+│   ├── session_store.py      # Estado de sesiones en memoria
+│   ├── workflow_runner.py    # Puente entre FastAPI y el agente (callback HITL async)
+│   └── README.md             # Documentación de la API
 ├── agents/
 │   ├── analizador_paci.py    # Agente 1: extrae perfil del PACI (incluye ramo/curso)
 │   ├── adaptador.py          # Agente 2: adapta el material educativo
@@ -277,6 +353,19 @@ prisma_agents/
     ├── document_loader.py    # Carga PDF (Gemini OCR), DOCX (XML) y JSON a texto
     ├── curriculum_catalog.py # Normaliza ramo/curso desde texto libre en español
     └── token_tracker.py      # Lógica de rastreo de tokens y uso por agente en el EventLoop
+
+frontend/
+├── src/
+│   ├── App.jsx               # Router entre UploadForm y ChatWindow
+│   ├── api.js                # Funciones fetch al backend
+│   └── components/
+│       ├── UploadForm.jsx    # Pantalla 1: carga de documentos
+│       ├── ChatWindow.jsx    # Pantalla 2: chat con polling
+│       ├── HitlCard.jsx      # Tarjeta de revisión HITL
+│       ├── MessageBubble.jsx # Burbuja de mensaje
+│       └── Spinner.jsx       # Indicador de carga
+├── vite.config.js            # Proxy /chat → puerto 8000
+└── package.json
 ```
 
 ---
