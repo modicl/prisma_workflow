@@ -1,19 +1,26 @@
+import os
 import tempfile
 import uuid
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+import boto3
+from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Header, UploadFile
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
 
-from api.session_store import SESSIONS, SessionData
+from api import dynamo_store
+from api.session_store import SESSIONS, SessionData, sync_to_dynamo
 from api.workflow_runner import run_workflow_for_api
 
 router = APIRouter(prefix="/chat")
 
+# Local dev upload dir (used only when S3_BUCKET is not configured)
 UPLOAD_DIR = Path(tempfile.gettempdir()) / "prisma_uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
+
+S3_BUCKET = os.environ.get("S3_BUCKET", "")
+INTERNAL_TOKEN = os.environ.get("INTERNAL_TOKEN", "")
 
 _ALLOWED_EXTENSIONS = {".pdf", ".docx", ".doc"}
 
@@ -35,6 +42,8 @@ class StartChatResponse(BaseModel):
     session_id: str
 
 
+# ── Public endpoints ──────────────────────────────────────────────────────────
+
 @router.post("/start", response_model=StartChatResponse, status_code=201)
 async def start_chat(
     background_tasks: BackgroundTasks,
@@ -44,53 +53,86 @@ async def start_chat(
     school_id: str = Form("colegio_demo"),
 ):
     session_id = str(uuid.uuid4())
-
     paci_ext = _safe_ext(paci_file.filename, ".pdf")
     material_ext = _safe_ext(material_file.filename, ".docx")
 
-    paci_path = UPLOAD_DIR / f"{session_id}_paci{paci_ext}"
-    material_path = UPLOAD_DIR / f"{session_id}_material{material_ext}"
-
-    try:
-        paci_path.write_bytes(await paci_file.read())
-        material_path.write_bytes(await material_file.read())
-    except Exception:
-        paci_path.unlink(missing_ok=True)
-        material_path.unlink(missing_ok=True)
-        raise HTTPException(status_code=500, detail="Error al guardar los archivos subidos")
+    paci_bytes = await paci_file.read()
+    material_bytes = await material_file.read()
 
     SESSIONS[session_id] = SessionData()
 
-    background_tasks.add_task(
-        run_workflow_for_api,
-        session_id=session_id,
-        paci_path=str(paci_path),
-        material_path=str(material_path),
-        prompt=prompt,
-        school_id=school_id,
-    )
+    if S3_BUCKET:
+        # Event-driven path: upload to S3, Lambda will call /internal/run
+        paci_s3_key = f"jobs/{session_id}/paci{paci_ext}"
+        material_s3_key = f"jobs/{session_id}/material{material_ext}"
+        try:
+            s3 = boto3.client("s3")
+            s3.put_object(Bucket=S3_BUCKET, Key=paci_s3_key, Body=paci_bytes)
+            s3.put_object(Bucket=S3_BUCKET, Key=material_s3_key, Body=material_bytes)
+        except Exception as exc:
+            SESSIONS.pop(session_id, None)
+            raise HTTPException(status_code=500, detail=f"Error al subir archivos a S3: {exc}")
+        dynamo_store.create_session(
+            session_id,
+            phase="running",
+            paci_s3_key=paci_s3_key,
+            material_s3_key=material_s3_key,
+            prompt=prompt,
+            school_id=school_id,
+        )
+    else:
+        # Local dev path: save to disk, launch background task directly
+        paci_path = UPLOAD_DIR / f"{session_id}_paci{paci_ext}"
+        material_path = UPLOAD_DIR / f"{session_id}_material{material_ext}"
+        try:
+            paci_path.write_bytes(paci_bytes)
+            material_path.write_bytes(material_bytes)
+        except Exception:
+            paci_path.unlink(missing_ok=True)
+            material_path.unlink(missing_ok=True)
+            SESSIONS.pop(session_id, None)
+            raise HTTPException(status_code=500, detail="Error al guardar los archivos subidos")
+        background_tasks.add_task(
+            run_workflow_for_api,
+            session_id=session_id,
+            paci_path=str(paci_path),
+            material_path=str(material_path),
+            prompt=prompt,
+            school_id=school_id,
+        )
 
     return {"session_id": session_id}
 
 
 @router.get("/{session_id}/state")
 async def get_state(session_id: str):
+    if dynamo_store.enabled():
+        item = dynamo_store.get_session(session_id)
+        if item is None:
+            raise HTTPException(status_code=404, detail="Sesión no encontrada")
+        return {
+            "phase":     item["phase"],
+            "messages":  item["messages"],
+            "hitl_data": item["hitl_data"],
+            "error":     item["error"],
+        }
+    # Local dev fallback
     if session_id not in SESSIONS:
         raise HTTPException(status_code=404, detail="Sesión no encontrada")
     sd = SESSIONS[session_id]
     return {
-        "phase": sd.phase,
-        "messages": sd.messages,
+        "phase":     sd.phase,
+        "messages":  sd.messages,
         "hitl_data": sd.hitl_data,
-        "error": sd.error,
+        "error":     sd.error,
     }
 
 
 @router.post("/{session_id}/hitl")
 async def respond_hitl(session_id: str, body: HitlResponseBody):
-    if session_id not in SESSIONS:
+    sd = SESSIONS.get(session_id)
+    if sd is None:
         raise HTTPException(status_code=404, detail="Sesión no encontrada")
-    sd = SESSIONS[session_id]
     if sd.phase != "awaiting_hitl":
         raise HTTPException(status_code=409, detail="La sesión no está esperando revisión HITL")
     await sd.hitl_response_queue.put({
@@ -103,6 +145,20 @@ async def respond_hitl(session_id: str, body: HitlResponseBody):
 
 @router.get("/{session_id}/download")
 async def download_result(session_id: str):
+    if dynamo_store.enabled():
+        item = dynamo_store.get_session(session_id)
+        if item is None:
+            raise HTTPException(status_code=404, detail="Sesión no encontrada")
+        if item.get("phase") != "completed" or not item.get("docx_s3_key"):
+            raise HTTPException(status_code=404, detail="Resultado no disponible aún")
+        url = boto3.client("s3").generate_presigned_url(
+            "get_object",
+            Params={"Bucket": S3_BUCKET, "Key": item["docx_s3_key"]},
+            ExpiresIn=3600,
+        )
+        return RedirectResponse(url=url, status_code=302)
+
+    # Local dev fallback
     if session_id not in SESSIONS:
         raise HTTPException(status_code=404, detail="Sesión no encontrada")
     sd = SESSIONS[session_id]
@@ -115,3 +171,33 @@ async def download_result(session_id: str):
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         filename=Path(sd.docx_path).name,
     )
+
+
+# ── Internal endpoint (called by Lambda) ─────────────────────────────────────
+
+@router.post("/internal/run/{session_id}")
+async def internal_run(
+    session_id: str,
+    background_tasks: BackgroundTasks,
+    x_internal_token: Optional[str] = Header(None),
+):
+    if INTERNAL_TOKEN and x_internal_token != INTERNAL_TOKEN:
+        raise HTTPException(status_code=401, detail="Token interno inválido")
+
+    item = dynamo_store.get_session(session_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Sesión no encontrada en DynamoDB")
+
+    # Ensure in-memory session exists (created by /start, but guard against edge cases)
+    if session_id not in SESSIONS:
+        SESSIONS[session_id] = SessionData()
+
+    background_tasks.add_task(
+        run_workflow_for_api,
+        session_id=session_id,
+        paci_s3_key=item["paci_s3_key"],
+        material_s3_key=item["material_s3_key"],
+        prompt=item["prompt"],
+        school_id=item["school_id"],
+    )
+    return {"started": True}
