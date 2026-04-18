@@ -106,8 +106,9 @@ def _load_pdf(path: Path, label: str | None) -> str:
     # Intentar extraer texto de response.text o de los parts del candidato
     extracted = response.text
     if not extracted and response.candidates:
-        parts = response.candidates[0].content.parts
-        extracted = "".join(p.text for p in parts if hasattr(p, "text") and p.text)
+        content = response.candidates[0].content
+        if content and content.parts:
+            extracted = "".join(p.text for p in content.parts if hasattr(p, "text") and p.text)
 
     if not extracted:
         raise ValueError(

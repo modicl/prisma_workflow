@@ -1,3 +1,4 @@
+import tempfile
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -11,7 +12,7 @@ from api.workflow_runner import run_workflow_for_api
 
 router = APIRouter(prefix="/chat")
 
-UPLOAD_DIR = Path("/tmp/prisma_uploads")
+UPLOAD_DIR = Path(tempfile.gettempdir()) / "prisma_uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
 
 _ALLOWED_EXTENSIONS = {".pdf", ".docx", ".doc"}
