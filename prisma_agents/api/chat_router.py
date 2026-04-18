@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Optional
 
 import boto3
+from botocore.config import Config
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Header, UploadFile
 from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
@@ -153,10 +154,15 @@ async def download_result(session_id: str):
             raise HTTPException(status_code=404, detail="Sesión no encontrada")
         if item.get("phase") != "completed" or not item.get("docx_s3_key"):
             raise HTTPException(status_code=404, detail="Resultado no disponible aún")
-        url = boto3.client("s3").generate_presigned_url(
+        s3 = boto3.client(
+            "s3",
+            region_name=os.environ.get("AWS_REGION", "us-east-1"),
+            config=Config(signature_version="s3v4"),
+        )
+        url = s3.generate_presigned_url(
             "get_object",
             Params={"Bucket": S3_BUCKET, "Key": item["docx_s3_key"]},
-            ExpiresIn=3600,
+            ExpiresIn=5 * 24 * 3600,  # 5 días
         )
         return RedirectResponse(url=url, status_code=302)
 

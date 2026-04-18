@@ -1,13 +1,18 @@
 import json
+import logging
 import os
 import time
 from typing import Optional
 
 import boto3
 
+logger = logging.getLogger(__name__)
+
 _client = None
 TABLE = os.environ.get("DYNAMO_TABLE", "")
 TTL_DAYS = 7
+
+logger.info(f"dynamo_store loaded — TABLE={TABLE!r} REGION={os.environ.get('AWS_REGION', 'us-east-1')!r}")
 
 _FIELD_TYPES = {
     "phase": "S",
@@ -37,7 +42,9 @@ def enabled() -> bool:
 
 def create_session(session_id: str, **fields) -> None:
     if not enabled():
+        logger.warning(f"create_session called but DynamoDB is disabled (DYNAMO_TABLE={TABLE!r})")
         return
+    logger.info(f"create_session {session_id} — table={TABLE}")
     _get_client().put_item(
         TableName=TABLE,
         Item={
