@@ -1,9 +1,18 @@
 import pytest
+from unittest.mock import patch
 from fastapi.testclient import TestClient
 from api.main import app
 from api.session_store import SESSIONS, SessionData
 
 client = TestClient(app)
+
+# Disable DynamoDB for all tests — unit tests must not require AWS connectivity
+pytestmark = pytest.mark.usefixtures("no_dynamo")
+
+@pytest.fixture(autouse=True)
+def no_dynamo():
+    with patch("api.dynamo_store.enabled", return_value=False):
+        yield
 
 
 def test_health():
