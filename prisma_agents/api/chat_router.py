@@ -65,13 +65,8 @@ async def start_chat(
         # Event-driven path: upload to S3, Lambda will call /internal/run
         paci_s3_key = f"jobs/{session_id}/paci{paci_ext}"
         material_s3_key = f"jobs/{session_id}/material{material_ext}"
-        try:
-            s3 = boto3.client("s3")
-            s3.put_object(Bucket=S3_BUCKET, Key=paci_s3_key, Body=paci_bytes)
-            s3.put_object(Bucket=S3_BUCKET, Key=material_s3_key, Body=material_bytes)
-        except Exception as exc:
-            SESSIONS.pop(session_id, None)
-            raise HTTPException(status_code=500, detail=f"Error al subir archivos a S3: {exc}")
+        # Write to DynamoDB BEFORE uploading to S3 — Lambda fires on the first PUT
+        # and must find the session record already in DynamoDB.
         dynamo_store.create_session(
             session_id,
             phase="running",
@@ -80,6 +75,13 @@ async def start_chat(
             prompt=prompt,
             school_id=school_id,
         )
+        try:
+            s3 = boto3.client("s3")
+            s3.put_object(Bucket=S3_BUCKET, Key=paci_s3_key, Body=paci_bytes)
+            s3.put_object(Bucket=S3_BUCKET, Key=material_s3_key, Body=material_bytes)
+        except Exception as exc:
+            SESSIONS.pop(session_id, None)
+            raise HTTPException(status_code=500, detail=f"Error al subir archivos a S3: {exc}")
     else:
         # Local dev path: save to disk, launch background task directly
         paci_path = UPLOAD_DIR / f"{session_id}_paci{paci_ext}"
