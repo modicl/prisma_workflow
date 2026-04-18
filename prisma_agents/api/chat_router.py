@@ -5,9 +5,8 @@ from pathlib import Path
 from typing import Optional
 
 import boto3
-from botocore.config import Config
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Header, UploadFile
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from api import dynamo_store
@@ -154,19 +153,14 @@ async def download_result(session_id: str):
             raise HTTPException(status_code=404, detail="Sesión no encontrada")
         if item.get("phase") != "completed" or not item.get("docx_s3_key"):
             raise HTTPException(status_code=404, detail="Resultado no disponible aún")
-        s3 = boto3.client(
-            "s3",
-            region_name=os.environ.get("AWS_REGION", "us-east-1"),
-            aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
-            aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"),
-            config=Config(signature_version="s3v4"),
+        s3 = boto3.client("s3", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+        s3_obj = s3.get_object(Bucket=S3_BUCKET, Key=item["docx_s3_key"])
+        filename = Path(item["docx_s3_key"]).name
+        return StreamingResponse(
+            s3_obj["Body"].iter_chunks(),
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
-        url = s3.generate_presigned_url(
-            "get_object",
-            Params={"Bucket": S3_BUCKET, "Key": item["docx_s3_key"]},
-            ExpiresIn=5 * 24 * 3600,  # 5 días
-        )
-        return RedirectResponse(url=url, status_code=302)
 
     # Local dev fallback
     if session_id not in SESSIONS:
