@@ -1,20 +1,13 @@
 from google.adk.agents.llm_agent import LlmAgent
-from google.genai import types as genai_types
+from pydantic import BaseModel
 
 MODEL = "gemini-2.5-flash-lite"
 
-CRITICO_SCHEMA = genai_types.Schema(
-    type=genai_types.Type.OBJECT,
-    properties={
-        "acceptable": genai_types.Schema(type=genai_types.Type.BOOLEAN),
-        "critique": genai_types.Schema(type=genai_types.Type.STRING),
-        "suggestions": genai_types.Schema(
-            type=genai_types.Type.ARRAY,
-            items=genai_types.Schema(type=genai_types.Type.STRING),
-        ),
-    },
-    required=["acceptable", "critique", "suggestions"],
-)
+
+class CriticoResponse(BaseModel):
+    acceptable: bool
+    critique: str
+    suggestions: list[str]
 
 INSTRUCTION = """Eres un evaluador experto en normativa educacional chilena para la inclusión, \
 con especialización en el Decreto 83/2015 (Diversificación de la Enseñanza), el \
@@ -104,9 +97,6 @@ def make_critico_agent() -> LlmAgent:
         model=MODEL,
         instruction=INSTRUCTION,
         output_key="evaluacion_critica",
+        output_schema=CriticoResponse,
         description="Evalúa la rúbrica contra el Decreto 83/2015 y el perfil PACI. Responde en JSON.",
-        generate_content_config=genai_types.GenerateContentConfig(
-            response_mime_type="application/json",
-            response_schema=CRITICO_SCHEMA,
-        ),
     )
