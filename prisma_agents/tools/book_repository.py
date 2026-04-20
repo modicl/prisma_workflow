@@ -9,6 +9,7 @@ Flujo:
 """
 
 import json
+import logging
 import os
 import re
 import tempfile
@@ -16,6 +17,8 @@ import tempfile
 import boto3
 from botocore.exceptions import ClientError
 from google import genai
+
+logger = logging.getLogger(__name__)
 
 
 def _get_s3_client():
@@ -36,7 +39,7 @@ def read_index(school_id: str, subject: str, grade: str) -> dict | None:
     s3 = _get_s3_client()
     key = f"schools/{school_id}/{subject}/{grade}/index.json"
     bucket = _get_bucket()
-    print(f"[BookRepository] S3 lookup → bucket={bucket!r}  key={key!r}")
+    logger.debug("[BookRepository] S3 lookup → bucket=%r  key=%r", bucket, key)
     try:
         response = s3.get_object(Bucket=bucket, Key=key)
         return json.loads(response["Body"].read().decode("utf-8"))
@@ -96,7 +99,7 @@ def transcribe_material_from_s3(school_id: str, subject: str, grade: str, filena
 
     try:
         with open(tmp_path, "wb") as f:
-            print(f"[BookRepository] descargando → bucket={_get_bucket()!r}  key={key!r}")
+            logger.debug("[BookRepository] descargando → bucket=%r  key=%r", _get_bucket(), key)
             response_s3 = s3.get_object(Bucket=_get_bucket(), Key=key)
             f.write(response_s3["Body"].read())
 
@@ -178,5 +181,5 @@ def get_reference_materials(
         ]
         return "\n\n".join(texts)
     except Exception as e:
-        print(f"[book_repository] Error obteniendo materiales de referencia: {e}")
+        logger.warning("[BookRepository] Error obteniendo materiales de referencia: %s", e)
         return ""
