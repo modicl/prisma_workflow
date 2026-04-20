@@ -314,7 +314,7 @@ class PaciWorkflowAgent(BaseAgent):
                 return
 
             evaluacion_raw = ctx.session.state.get("evaluacion_critica", "")
-            print(f"\n[DEBUG] Respuesta cruda del Agente Crítico:\n{evaluacion_raw[:500]}\n")
+            print(f"\n[DEBUG] Respuesta cruda del Agente Crítico:\n{str(evaluacion_raw)[:500]}\n")
             evaluacion = _parse_critic_json(evaluacion_raw)
 
             if evaluacion.get("acceptable", False):
@@ -338,15 +338,16 @@ class PaciWorkflowAgent(BaseAgent):
                 ctx.session.state["status"] = "fail"
 
 
-def _parse_critic_json(raw: str) -> dict:
-    """Parsea la respuesta JSON del Agente Crítico."""
+def _parse_critic_json(raw) -> dict:
+    """Parsea la respuesta del Agente Crítico. ADK puede entregar dict o JSON string según output_schema."""
+    if isinstance(raw, dict):
+        return raw
     try:
         return json.loads(raw.strip())
-    except json.JSONDecodeError:
-        # response_schema de Gemini garantiza JSON válido; este fallback cubre errores de ADK inesperados
+    except (json.JSONDecodeError, AttributeError):
         return {
             "acceptable": False,
-            "critique": raw,
+            "critique": str(raw),
             "suggestions": ["El Agente Crítico no retornó JSON válido. Revisar la rúbrica manualmente."],
         }
 
