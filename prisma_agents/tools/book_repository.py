@@ -8,6 +8,7 @@ Flujo:
   4. get_reference_materials()  → orquesta todo; retorna "" si cualquier paso falla
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -183,3 +184,13 @@ def get_reference_materials(
     except Exception as e:
         logger.warning("[BookRepository] Error obteniendo materiales de referencia: %s", e)
         return ""
+
+
+async def get_reference_materials_async(
+    school_id: str, subject: str, grade: str, perfil_paci: str
+) -> str:
+    """Versión async de get_reference_materials. Corre en executor para no bloquear el event loop."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        None, get_reference_materials, school_id, subject, grade, perfil_paci
+    )
