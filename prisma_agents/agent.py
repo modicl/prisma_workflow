@@ -33,7 +33,7 @@ from agents.adaptador import make_adaptador_agent
 from agents.generador_rubrica import make_generador_rubrica_agent
 from agents.critico import make_critico_agent
 from utils.curriculum_catalog import normalize_subject, normalize_grade
-from tools.book_repository import get_reference_materials
+from tools.book_repository import get_reference_materials_async
 
 _genai_client: genai.Client | None = None
 
@@ -239,7 +239,7 @@ class PaciWorkflowAgent(BaseAgent):
         materiales_texto = ""
         if school_id and subject and grade:
             print(f"\n[BookRepository] Buscando materiales: {subject}/{grade} — colegio {school_id}...\n")
-            raw = get_reference_materials(school_id, subject, grade, perfil_paci)
+            raw = await get_reference_materials_async(school_id, subject, grade, perfil_paci)
             if raw:
                 # Envuelve con encabezado y etiqueta de seguridad para que el LLM identifique la sección
                 materiales_texto = (
@@ -339,31 +339,16 @@ class PaciWorkflowAgent(BaseAgent):
 
 
 def _parse_critic_json(raw: str) -> dict:
-    """Parsea la respuesta JSON del Agente Crítico de forma robusta."""
-    cleaned = raw.strip()
-
-    # Intento directo
+    """Parsea la respuesta JSON del Agente Crítico."""
     try:
-        return json.loads(cleaned)
+        return json.loads(raw.strip())
     except json.JSONDecodeError:
-        pass
-
-    # Extrae el primer objeto JSON del texto
-    match = re.search(r'\{.*\}', cleaned, re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group())
-        except json.JSONDecodeError:
-            pass
-
-    # Fallback: no aceptable con el texto raw como critique
-    return {
-        "acceptable": False,
-        "critique": raw,
-        "suggestions": [
-            "El Agente Crítico no retornó JSON válido. Revisar la rúbrica manualmente."
-        ],
-    }
+        # response_schema de Gemini garantiza JSON válido; este fallback cubre errores de ADK inesperados
+        return {
+            "acceptable": False,
+            "critique": raw,
+            "suggestions": ["El Agente Crítico no retornó JSON válido. Revisar la rúbrica manualmente."],
+        }
 
 
 root_agent = PaciWorkflowAgent()

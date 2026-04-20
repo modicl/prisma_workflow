@@ -263,11 +263,71 @@ La rama `feature/ui-backend` incluye un prototipo funcional de la interfaz web. 
 
 ### Arquitectura
 
+El sistema implementa una **arquitectura event-driven** basada en tres servicios AWS más dos backends desacoplados:
+
 ```
-React + Tailwind (puerto 5173)  ←→  FastAPI (puerto 8000)  ←→  PaciWorkflowAgent
+                  ┌─────────────────────────────────────┐
+                  │   MICROSERVICIO DE UPLOAD            │
+                  │   (desacoplado del agente)           │
+[Docente — Browser]─── POST /chat/start ──────────────▶ │
+                  │  ├─ Escribe sesión en DynamoDB       │
+                  │  ├─ Sube archivos a S3               │
+                  │  └─ Retorna { session_id }           │
+                  └─────────────────────────────────────┘
+                               │ < 1 segundo
+                               ▼
+                  S3 PUT Event (automático)
+                               │
+                               ▼
+                  [AWS Lambda — trigger liviano]
+                    Lee session_id del evento S3
+                    Llama POST /internal/run/{session_id}
+                               │
+                               ▼
+                  ┌─────────────────────────────────────┐
+                  │   BACKEND DEL AGENTE                 │
+                  │   Descarga archivos desde S3         │
+                  │   Corre PaciWorkflowAgent completo   │
+                  │   En checkpoint HITL:                │
+                  │     → escribe hitl_data en DynamoDB  │
+                  │     → phase = "awaiting_hitl"        │
+                  │     → espera respuesta del docente   │
+                  │   Al completar:                      │
+                  │     → sube DOCX a S3 (results/)      │
+                  │     → phase = "completed" en Dynamo  │
+                  └─────────────────────────────────────┘
+
+[Browser — polling GET /chat/{id}/state cada 2s]
+  ← Lee estado desde DynamoDB
 ```
 
-FastAPI corre en el mismo proceso que el agente. El frontend es una SPA React que se comunica vía REST.
+**¿Por qué dos backends separados?**
+
+El microservicio de upload y el backend del agente tienen responsabilidades, ciclos de vida y requisitos de cómputo completamente distintos:
+
+| | Microservicio de upload | Backend del agente |
+|---|---|---|
+| **Responsabilidad** | Recibir archivos, escribir en DynamoDB, subir a S3 | Correr el flujo multi-agente, manejar HITL |
+| **Duración de request** | < 1 segundo | 5-15 minutos por sesión |
+| **Escala** | Escala horizontal fácilmente (stateless) | Stateful — mantiene `asyncio.Queue` por sesión |
+| **Cómputo** | Mínimo (I/O puro) | Intensivo (LLM calls, procesamiento de documentos) |
+| **Dependencias** | Solo boto3 + FastAPI | Google ADK, Gemini, todas las dependencias del agente |
+
+Desacoplarlos evita que una subida de archivos lenta o un spike de uploads afecte al agente en ejecución, y permite escalar o reemplazar cada servicio de forma independiente.
+
+> **En el prototipo actual** ambos corren en el mismo proceso FastAPI para simplificar el desarrollo. El contrato entre ellos es S3 + DynamoDB + el endpoint `/internal/run`, por lo que separarlos en producción no requiere cambiar ningún otro componente.
+
+**Servicios AWS utilizados:**
+
+| Servicio | Rol |
+|---|---|
+| **S3** (`prisma-workflow`) | Almacena archivos de entrada (`jobs/`) y la rúbrica generada (`results/`) |
+| **DynamoDB** (`prisma-sessions`) | Store de estado de sesiones — permite que el frontend haga polling al backend sin depender de memoria en proceso |
+| **Lambda** (`prisma-trigger`) | Trigger liviano (stdlib Python, sin dependencias externas) que dispara el flujo del agente en respuesta al PUT de S3 |
+
+**Ventaja clave de esta arquitectura:** el docente sube los archivos y recibe `session_id` en menos de 1 segundo. El procesamiento del agente (que puede durar 5-15 minutos) ocurre completamente en background, sin bloquear al usuario ni mantener una conexión HTTP abierta.
+
+El frontend es una SPA React que se comunica vía REST.
 
 ### Cómo correrlo
 
@@ -315,14 +375,45 @@ Ver documentación completa en [`prisma_agents/api/README.md`](prisma_agents/api
 | `GET /chat/{id}/download` | Descarga el `.docx` generado |
 | `GET /health` | Healthcheck |
 
+### Variables de entorno requeridas (backend)
+
+```bash
+# Google AI
+GOOGLE_API_KEY=...
+
+# PostgreSQL (logs ADK)
+BD_LOGS=postgresql://...
+
+# AWS — credenciales IAM
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+AWS_REGION=us-east-2
+
+# S3 bucket de materiales del colegio
+S3_BUCKET_NAME=prisma-schools-repos
+
+# Arquitectura event-driven (dejar vacío para dev local sin AWS)
+S3_BUCKET=prisma-workflow
+DYNAMO_TABLE=prisma-sessions
+INTERNAL_TOKEN=<secreto compartido con Lambda>
+```
+
+### Variables de entorno Lambda (`prisma-trigger`)
+
+```bash
+BACKEND_INTERNAL_URL=https://tu-backend.com
+INTERNAL_TOKEN=<mismo secreto que el backend>
+```
+
 ### Consideraciones para producción
 
 El prototipo deliberadamente omite aspectos que deberán resolverse en una implementación real:
 
 - **Autenticación:** no hay login ni control de acceso. En producción se requiere al menos autenticación por docente.
-- **Persistencia de sesiones:** las sesiones viven en memoria; un reinicio del servidor las pierde. En producción usar Redis u otro store persistente.
-- **Limpieza de sesiones:** las sesiones completadas nunca se eliminan del diccionario en memoria. En producción agregar TTL o limpieza periódica.
+- **Limpieza de sesiones en memoria:** las sesiones completadas nunca se eliminan del dict `SESSIONS`. En producción agregar TTL o limpieza periódica. DynamoDB tiene TTL automático configurado a 7 días.
 - **Múltiples colegios:** `school_id` está fijo como `"colegio_demo"`. En producción debe ser configurable por docente o institución.
+- **DOCX en disco:** el archivo generado queda en el disco del backend indefinidamente. En producción servir directamente desde S3 con lifecycle policy.
+- **Lambda y VPC:** si el backend corre en subred privada, la Lambda debe estar en la misma VPC para poder llamarlo por URL interna.
 - **Infraestructura:** frontend y backend separados en contenedores distintos, con un proxy inverso (nginx) sirviendo el frontend y enrutando `/chat/*` al backend.
 
 ---
@@ -337,11 +428,15 @@ prisma_agents/
 ├── .env                      # API Key + credenciales AWS (no subir a repositorio)
 ├── dashboard.py              # Script interactivo de reportes de consumo de tokens API
 ├── api/
-│   ├── main.py               # FastAPI app principal
-│   ├── chat_router.py        # Endpoints /chat/*
-│   ├── session_store.py      # Estado de sesiones en memoria
-│   ├── workflow_runner.py    # Puente entre FastAPI y el agente (callback HITL async)
+│   ├── main.py               # FastAPI app principal (carga .env, monta routers)
+│   ├── chat_router.py        # Endpoints /chat/* + /internal/run
+│   ├── session_store.py      # SessionData en memoria + sync a DynamoDB
+│   ├── workflow_runner.py    # Puente entre FastAPI y el agente (descarga S3, callback HITL)
+│   ├── dynamo_store.py       # Wrapper DynamoDB (create/get/update session)
 │   └── README.md             # Documentación de la API
+
+lambda/
+└── trigger_handler.py        # Lambda trigger: recibe evento S3 → llama /internal/run
 ├── agents/
 │   ├── analizador_paci.py    # Agente 1: extrae perfil del PACI (incluye ramo/curso)
 │   ├── adaptador.py          # Agente 2: adapta el material educativo

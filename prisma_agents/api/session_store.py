@@ -1,6 +1,9 @@
 import asyncio
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Optional
+from typing import Awaitable, Callable, Optional
+
+from api import dynamo_store
+
 
 @dataclass
 class SessionData:
@@ -12,7 +15,20 @@ class SessionData:
     docx_path: Optional[str] = None
     error: Optional[str] = None
 
+
 HitlCallback = Callable[[dict, int, int], Awaitable[tuple[bool, str, int]]]
 
 SESSIONS: dict[str, SessionData] = {}
 HITL_CALLBACKS: dict[str, HitlCallback] = {}
+
+
+def sync_to_dynamo(session_id: str, session_data: SessionData, **extra) -> None:
+    """Mirror in-memory session state to DynamoDB (no-op if DynamoDB not configured)."""
+    dynamo_store.update_session(
+        session_id,
+        phase=session_data.phase,
+        messages=session_data.messages,
+        hitl_data=session_data.hitl_data,
+        error=session_data.error,
+        **extra,
+    )
