@@ -5,6 +5,7 @@ import time
 from typing import Optional
 
 import boto3
+from botocore.exceptions import ClientError
 
 logger = logging.getLogger(__name__)
 
@@ -45,31 +46,45 @@ def create_session(session_id: str, **fields) -> None:
         logger.warning(f"create_session called but DynamoDB is disabled (DYNAMO_TABLE={TABLE!r})")
         return
     logger.info(f"create_session {session_id} — table={TABLE}")
-    _get_client().put_item(
-        TableName=TABLE,
-        Item={
-            "session_id":      {"S": session_id},
-            "phase":           {"S": fields.get("phase", "running")},
-            "messages":        {"S": "[]"},
-            "hitl_data":       {"S": "null"},
-            "error":           {"S": ""},
-            "docx_s3_key":     {"S": ""},
-            "paci_s3_key":     {"S": fields.get("paci_s3_key", "")},
-            "material_s3_key": {"S": fields.get("material_s3_key", "")},
-            "prompt":          {"S": fields.get("prompt", "")},
-            "school_id":       {"S": fields.get("school_id", "")},
-            "expires_at":      {"N": str(int(time.time()) + TTL_DAYS * 86400)},
-        },
-    )
+    try:
+        _get_client().put_item(
+            TableName=TABLE,
+            Item={
+                "session_id":      {"S": session_id},
+                "phase":           {"S": fields.get("phase", "running")},
+                "messages":        {"S": "[]"},
+                "hitl_data":       {"S": "null"},
+                "error":           {"S": ""},
+                "docx_s3_key":     {"S": ""},
+                "paci_s3_key":     {"S": fields.get("paci_s3_key", "")},
+                "material_s3_key": {"S": fields.get("material_s3_key", "")},
+                "prompt":          {"S": fields.get("prompt", "")},
+                "school_id":       {"S": fields.get("school_id", "")},
+                "expires_at":      {"N": str(int(time.time()) + TTL_DAYS * 86400)},
+            },
+        )
+    except ClientError as e:
+        code = e.response["Error"]["Code"]
+        logger.error("DynamoDB error [%s] en create_session %s: %s", code, session_id, e)
+    except Exception as e:
+        logger.error("DynamoDB error inesperado en create_session %s: %s", session_id, e)
 
 
 def get_session(session_id: str) -> Optional[dict]:
     if not enabled():
         return None
-    resp = _get_client().get_item(
-        TableName=TABLE,
-        Key={"session_id": {"S": session_id}},
-    )
+    try:
+        resp = _get_client().get_item(
+            TableName=TABLE,
+            Key={"session_id": {"S": session_id}},
+        )
+    except ClientError as e:
+        code = e.response["Error"]["Code"]
+        logger.error("DynamoDB error [%s] en get_session %s: %s", code, session_id, e)
+        return None
+    except Exception as e:
+        logger.error("DynamoDB error inesperado en get_session %s: %s", session_id, e)
+        return None
     item = resp.get("Item")
     if not item:
         return None
@@ -102,10 +117,19 @@ def update_session(session_id: str, **fields) -> None:
         expr_parts.append(f"#f{i} = :v{i}")
     if not expr_parts:
         return
-    _get_client().update_item(
-        TableName=TABLE,
-        Key={"session_id": {"S": session_id}},
-        UpdateExpression="SET " + ", ".join(expr_parts),
-        ExpressionAttributeNames=names,
-        ExpressionAttributeValues=values,
-    )
+    try:
+        _get_client().update_item(
+            TableName=TABLE,
+            Key={"session_id": {"S": session_id}},
+            UpdateExpression="SET " + ", ".join(expr_parts),
+            ExpressionAttributeNames=names,
+            ExpressionAttributeValues=values,
+        )
+    except ClientError as e:
+        code = e.response["Error"]["Code"]
+        if code == "ProvisionedThroughputExceededException":
+            logger.warning("DynamoDB throttle en update_session %s, omitiendo update", session_id)
+        else:
+            logger.error("DynamoDB error [%s] en update_session %s: %s", code, session_id, e)
+    except Exception as e:
+        logger.error("DynamoDB error inesperado en update_session %s: %s", session_id, e)
