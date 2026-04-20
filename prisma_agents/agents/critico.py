@@ -1,6 +1,20 @@
 from google.adk.agents.llm_agent import LlmAgent
+from google.genai import types as genai_types
 
 MODEL = "gemini-2.5-flash-lite"
+
+CRITICO_SCHEMA = genai_types.Schema(
+    type=genai_types.Type.OBJECT,
+    properties={
+        "acceptable": genai_types.Schema(type=genai_types.Type.BOOLEAN),
+        "critique": genai_types.Schema(type=genai_types.Type.STRING),
+        "suggestions": genai_types.Schema(
+            type=genai_types.Type.ARRAY,
+            items=genai_types.Schema(type=genai_types.Type.STRING),
+        ),
+    },
+    required=["acceptable", "critique", "suggestions"],
+)
 
 INSTRUCTION = """Eres un evaluador experto en normativa educacional chilena para la inclusión, \
 con especialización en el Decreto 83/2015 (Diversificación de la Enseñanza), el \
@@ -81,13 +95,6 @@ Se te proporciona:
 
 Evalúa la rúbrica contra los criterios normativos anteriores y la pertinencia al perfil.
 
-## INSTRUCCIÓN CRÍTICA
-Responde ÚNICAMENTE con un objeto JSON válido. No incluyas texto antes ni después del JSON. \
-No uses bloques de código markdown. Solo el JSON puro:
-
-{"acceptable": true o false, "critique": "Análisis detallado...", "suggestions": ["sugerencia 1", "sugerencia 2"]}
-
-Si "acceptable" es true, "suggestions" puede ser [] o con mejoras menores opcionales.
 Si "acceptable" es false, "suggestions" DEBE tener al menos 2 sugerencias concretas y accionables \
 que el Generador de Rúbrica pueda implementar directamente."""
 
@@ -98,4 +105,8 @@ def make_critico_agent() -> LlmAgent:
         instruction=INSTRUCTION,
         output_key="evaluacion_critica",
         description="Evalúa la rúbrica contra el Decreto 83/2015 y el perfil PACI. Responde en JSON.",
+        generate_content_config=genai_types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=CRITICO_SCHEMA,
+        ),
     )

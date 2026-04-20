@@ -339,31 +339,16 @@ class PaciWorkflowAgent(BaseAgent):
 
 
 def _parse_critic_json(raw: str) -> dict:
-    """Parsea la respuesta JSON del Agente Crítico de forma robusta."""
-    cleaned = raw.strip()
-
-    # Intento directo
+    """Parsea la respuesta JSON del Agente Crítico."""
     try:
-        return json.loads(cleaned)
+        return json.loads(raw.strip())
     except json.JSONDecodeError:
-        pass
-
-    # Extrae el primer objeto JSON del texto
-    match = re.search(r'\{.*\}', cleaned, re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group())
-        except json.JSONDecodeError:
-            pass
-
-    # Fallback: no aceptable con el texto raw como critique
-    return {
-        "acceptable": False,
-        "critique": raw,
-        "suggestions": [
-            "El Agente Crítico no retornó JSON válido. Revisar la rúbrica manualmente."
-        ],
-    }
+        # response_schema de Gemini garantiza JSON válido; este fallback cubre errores de ADK inesperados
+        return {
+            "acceptable": False,
+            "critique": raw,
+            "suggestions": ["El Agente Crítico no retornó JSON válido. Revisar la rúbrica manualmente."],
+        }
 
 
 root_agent = PaciWorkflowAgent()
