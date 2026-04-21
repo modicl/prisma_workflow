@@ -91,9 +91,9 @@ def get_session(session_id: str) -> Optional[dict]:
     return {
         "session_id":      item["session_id"]["S"],
         "phase":           item["phase"]["S"],
-        "messages":        json.loads(item["messages"]["S"]),
-        "hitl_data":       json.loads(item["hitl_data"]["S"]),
-        "error":           item["error"]["S"] or None,
+        "messages":        json.loads(item.get("messages", {}).get("S", "[]")),
+        "hitl_data":       json.loads(item.get("hitl_data", {}).get("S", "null")),
+        "error":           item.get("error", {}).get("S") or None,
         "docx_s3_key":     item.get("docx_s3_key", {}).get("S") or None,
         "paci_s3_key":     item.get("paci_s3_key", {}).get("S", ""),
         "material_s3_key": item.get("material_s3_key", {}).get("S", ""),
