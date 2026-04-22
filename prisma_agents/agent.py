@@ -236,6 +236,15 @@ class PaciWorkflowAgent(BaseAgent):
         if not grade and prompt_docente:
             grade = normalize_grade(prompt_docente)
 
+        # Fallback: si sigue sin ramo o curso (ej. PACI dice "Todas las asignaturas"),
+        # inferir desde el material_document sin costo extra de tokens
+        if not subject or not grade:
+            material_doc = ctx.session.state.get("material_document", "")
+            if not subject:
+                subject = normalize_subject(material_doc)
+            if not grade:
+                grade = normalize_grade(material_doc)
+
         materiales_texto = ""
         if school_id and subject and grade:
             print(f"\n[BookRepository] Buscando materiales: {subject}/{grade} — colegio {school_id}...\n")
