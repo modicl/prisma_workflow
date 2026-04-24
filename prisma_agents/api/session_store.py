@@ -14,6 +14,7 @@ class SessionData:
     result: Optional[dict] = None
     docx_path: Optional[str] = None
     error: Optional[str] = None
+    workflow_status: Optional[str] = None  # "success" | "degraded" | "hitl_rejected" | "error"
 
 
 HitlCallback = Callable[[dict, int, int], Awaitable[tuple[bool, str, int]]]
@@ -30,5 +31,6 @@ def sync_to_dynamo(session_id: str, session_data: SessionData, **extra) -> None:
         messages=session_data.messages,
         hitl_data=session_data.hitl_data,
         error=session_data.error,
+        workflow_status=session_data.workflow_status,
         **extra,
     )

@@ -85,24 +85,55 @@ async def run_workflow_for_api(
             api_session_id=session_id,
         )
 
+        agent_status = results.get("status", "success")
         session_data.result = results
-        session_data.docx_path = results.get("docx_path")
-        session_data.phase = "completed"
-        session_data.messages.append({
-            "role": "agent",
-            "content": "✅ Proceso completado. La rúbrica adaptada está lista para descargar.",
-        })
 
-        # Upload DOCX to S3 and record the key in DynamoDB
-        docx_s3_key = ""
-        if S3_BUCKET and session_data.docx_path and Path(session_data.docx_path).exists():
-            docx_s3_key = f"results/{session_id}/rubrica.docx"
-            boto3.client("s3").upload_file(session_data.docx_path, S3_BUCKET, docx_s3_key)
+        if agent_status in ("success", "fail"):
+            session_data.docx_path = results.get("docx_path")
+            session_data.phase = "completed"
+            session_data.workflow_status = "success" if agent_status == "success" else "degraded"
+            message = (
+                "✅ Proceso completado. La rúbrica adaptada está lista para descargar."
+                if agent_status == "success"
+                else "⚠️ Proceso completado. La rúbrica fue generada como mejor esfuerzo y no superó todos los criterios de calidad. Revise el documento antes de usarlo."
+            )
+            session_data.messages.append({"role": "agent", "content": message})
 
-        sync_to_dynamo(session_id, session_data, docx_s3_key=docx_s3_key)
+            # Upload DOCX to S3 and record the key in DynamoDB
+            docx_s3_key = ""
+            if S3_BUCKET and session_data.docx_path and Path(session_data.docx_path).exists():
+                docx_s3_key = f"results/{session_id}/rubrica.docx"
+                boto3.client("s3").upload_file(session_data.docx_path, S3_BUCKET, docx_s3_key)
+
+            sync_to_dynamo(session_id, session_data, docx_s3_key=docx_s3_key)
+
+        elif agent_status == "hitl_rejected":
+            session_data.phase = "error"
+            session_data.workflow_status = "hitl_rejected"
+            session_data.error = (
+                "Proceso cancelado: se agotaron los intentos de revisión "
+                "sin obtener aprobación del docente."
+            )
+            session_data.messages.append({
+                "role": "system",
+                "content": "❌ Proceso cancelado: el análisis inicial no obtuvo aprobación del docente en el número máximo de intentos.",
+            })
+            sync_to_dynamo(session_id, session_data)
+
+        else:
+            # timeout u otro estado no reconocido
+            session_data.phase = "error"
+            session_data.workflow_status = "error"
+            session_data.error = f"El proceso terminó con estado inesperado: {agent_status}."
+            session_data.messages.append({
+                "role": "system",
+                "content": "❌ El proceso agotó el tiempo de espera en un agente. Intente nuevamente.",
+            })
+            sync_to_dynamo(session_id, session_data)
 
     except Exception as exc:
         session_data.phase = "error"
+        session_data.workflow_status = "error"
         session_data.error = str(exc)
         session_data.messages.append({
             "role": "system",
