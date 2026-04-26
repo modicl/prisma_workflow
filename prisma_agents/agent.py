@@ -142,7 +142,7 @@ async def _hitl_checkpoint(
 
 
 MAX_ITERATIONS = 3
-MAX_HITL_ITERATIONS = 6          # intentos de revisión del profesor
+MAX_HITL_ITERATIONS = 3          # intentos de revisión del profesor
 AGENT_TIMEOUT_SECONDS = 90   # segundos por agente antes de considerar timeout
 MAX_RETRIES_ON_TIMEOUT = 2   # reintentos adicionales si el agente hace timeout
 RETRY_DELAY_SECONDS = 5      # espera entre reintentos
@@ -281,7 +281,9 @@ class PaciWorkflowAgent(BaseAgent):
                 break
 
             # Intentos agotados — cancela el flujo
-            if agente == 0:
+            # agente == 0: camino CLI (última iteración retorna 0 explícitamente)
+            # hitl_attempt == MAX_HITL_ITERATIONS: camino API (agent_to_retry siempre 1 o 2)
+            if agente == 0 or hitl_attempt == MAX_HITL_ITERATIONS:
                 ctx.session.state["status"] = "hitl_rejected"
                 return
 

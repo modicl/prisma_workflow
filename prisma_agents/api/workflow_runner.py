@@ -14,6 +14,19 @@ from run import run_workflow
 S3_BUCKET = os.environ.get("S3_BUCKET", "")
 
 
+def _friendly_error(exc: Exception) -> str:
+    msg = str(exc).lower()
+    if "api key" in msg or "api_key" in msg or "invalid_argument" in msg:
+        return "Error de configuración del servicio IA. Contacte al administrador."
+    if "timeout" in msg or "timed out" in msg or "deadline" in msg:
+        return "El servicio de IA no respondió a tiempo. Intente nuevamente."
+    if "quota" in msg or "resource_exhausted" in msg:
+        return "Se alcanzó el límite de uso del servicio IA. Intente más tarde."
+    if "unavailable" in msg or "connection" in msg or "network" in msg:
+        return "No se pudo conectar con el servicio IA. Verifique la conexión."
+    return "Ocurrió un error inesperado en el servidor. Intente nuevamente."
+
+
 def _download_from_s3(s3_key: str) -> str:
     """Download an S3 object to a local temp file and return the local path."""
     suffix = Path(s3_key).suffix or ".tmp"
@@ -43,6 +56,8 @@ async def run_workflow_for_api(
         material_path = _download_from_s3(material_s3_key)
         s3_downloaded = [paci_path, material_path]
 
+    hitl_was_rejected = [False]
+
     async def hitl_callback(state: dict, attempt: int, max_attempts: int) -> tuple[bool, str, int]:
         session_data.hitl_data = {
             "perfil_paci": state.get("perfil_paci", ""),
@@ -65,6 +80,13 @@ async def run_workflow_for_api(
         approved = response.get("approved", False)
         reason = response.get("reason") or ""
         agent_to_retry = int(response.get("agent_to_retry") or 0)
+
+        # Si es el último intento y el docente rechaza, señalizamos directamente
+        # sin depender de que ADK persista ctx.session.state en el return temprano.
+        if not approved and attempt >= max_attempts:
+            hitl_was_rejected[0] = True
+            return False, reason, 0  # agente=0 → agent.py cancela el flujo
+
         return approved, reason, agent_to_retry
 
     HITL_CALLBACKS[session_id] = hitl_callback
@@ -85,7 +107,9 @@ async def run_workflow_for_api(
             api_session_id=session_id,
         )
 
-        agent_status = results.get("status", "success")
+        # hitl_was_rejected es la fuente de verdad: no depende de que ADK
+        # persista ctx.session.state en el return temprano del agente.
+        agent_status = "hitl_rejected" if hitl_was_rejected[0] else results.get("status", "success")
         session_data.result = results
 
         if agent_status in ("success", "fail"):
@@ -132,12 +156,14 @@ async def run_workflow_for_api(
             sync_to_dynamo(session_id, session_data)
 
     except Exception as exc:
+        import logging
+        logging.getLogger(__name__).error("workflow error [%s]: %s", session_id, exc, exc_info=True)
         session_data.phase = "error"
         session_data.workflow_status = "error"
-        session_data.error = str(exc)
+        session_data.error = _friendly_error(exc)
         session_data.messages.append({
             "role": "system",
-            "content": f"❌ Error durante el procesamiento: {str(exc)}",
+            "content": "❌ El procesamiento fue interrumpido por un error del servidor.",
         })
         sync_to_dynamo(session_id, session_data)
 
