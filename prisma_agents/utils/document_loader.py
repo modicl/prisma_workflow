@@ -54,28 +54,48 @@ def load_document(path: str, label: str | None = None) -> str:
 
 def _load_pdf(path: Path, label: str | None) -> str:
     """
-    Rutina específica para extraer texto de archivos PDF.
-    
-    IMPLEMENTACIÓN CLAVE: En lugar de usar librerías clásicas como PyPDF2 o pdfplumber, 
-    esta función sube el PDF a la API File API de Gemini de Google. Esto es intencional 
-    porque los modelos multimodales (como flash-lite) entienden muchísimo mejor la 
-    estructura visual (como tablas, columnas y cuadros de texto complejos) que una librería 
-    de parseo a texto normal.
-    
-    Args:
-        path (Path): Objeto Path de la librería pathlib.
-        label (str): Etiqueta para prefijar el contexto.
-    
-    Returns:
-        str: La trascripción casi perfecta del PDF.
+    Extrae texto de un PDF con estrategia híbrida:
+    1. pdfplumber para PDFs digitales (texto seleccionable) — sin coste de API.
+    2. Gemini Files API + OCR solo cuando pdfplumber no extrae suficiente texto
+       (PDFs escaneados o basados en imágenes).
     """
+    # --- Intento 1: extracción nativa con pdfplumber ---
+    extracted = _extract_pdf_native(path)
+    if extracted:
+        prefix = f"[Documento PDF: {label or path.name}]\n\n" if label else f"[{path.name}]\n\n"
+        text = prefix + extracted
+        print(f"  ✓ {label or path.name} cargado ({len(text):,} caracteres) [pdfplumber]")
+        return text
+
+    # --- Intento 2: Gemini OCR para PDFs escaneados ---
+    print(f"  → PDF sin texto extraíble — usando Gemini OCR...")
+    return _extract_pdf_gemini(path, label)
+
+
+def _extract_pdf_native(path: Path) -> str:
+    """Extrae texto de un PDF digital con pdfplumber. Retorna '' si el PDF es una imagen."""
+    import pdfplumber
+
+    pages_text: list[str] = []
+    with pdfplumber.open(str(path)) as pdf:
+        for page in pdf.pages:
+            page_text = page.extract_text() or ""
+            if page_text.strip():
+                pages_text.append(page_text)
+
+    combined = "\n\n".join(pages_text).strip()
+    # Umbral: si hay menos de 50 caracteres en todo el doc, probablemente es un escaneado
+    return combined if len(combined) >= 50 else ""
+
+
+def _extract_pdf_gemini(path: Path, label: str | None) -> str:
+    """Sube el PDF a la Files API de Gemini y usa OCR multimodal para extraer texto."""
     import os
     from google import genai
+    from google.genai import types as genai_types
 
-    # Instanciamos el cliente Gemini leyendo GOOGLE_API_KEY desde el ambiente virtual
     client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY"))
 
-    # Paso 1: Subir el PDF directamente a la nube (Workspace temporal del modelo)
     print(f"  → Subiendo {label or path.name} a Google Files API...")
     with open(path, "rb") as f:
         uploaded = client.files.upload(
@@ -83,42 +103,47 @@ def _load_pdf(path: Path, label: str | None) -> str:
             config={"mime_type": "application/pdf", "display_name": path.name},
         )
 
-    # Paso 2: Invocar a gemini-2.5-flash-lite para que "lea" la imagen del PDF.
-    # El bloque try/finally garantiza que el archivo se elimine de los servidores de Google
-    # incluso si la llamada al modelo falla, evitando retención de PII en la nube.
-    print(f"  → Transcribiendo con Gemini...         (puede tardar 20-60s según el PDF)")
+    print(f"  → Transcribiendo con Gemini OCR...     (puede tardar 20-60s según el PDF)")
     try:
         response = client.models.generate_content(
             model="gemini-2.5-flash-lite",
             contents=[
                 uploaded,
-                "Este documento puede ser un PDF escaneado o con formularios. "
-                "Usa OCR si es necesario. "
-                "Extrae y transcribe TODO el texto visible: párrafos, tablas, cuadros, "
-                "encabezados, pies de página y cualquier campo de formulario. "
-                "No omitas nada aunque el texto sea pequeño o esté en una imagen.",
+                "Este es un PDF escaneado. Usa OCR para extraer todo el texto visible: "
+                "párrafos, tablas, cuadros, encabezados, pies de página y campos de formulario. "
+                "Transcribe fielmente sin agregar interpretaciones.",
             ],
+            config=genai_types.GenerateContentConfig(
+                thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
+            ),
         )
     finally:
         print(f"  → Eliminando archivo de la nube...")
         client.files.delete(name=uploaded.name)
 
-    # Intentar extraer texto de response.text o de los parts del candidato
     extracted = response.text
     if not extracted and response.candidates:
         content = response.candidates[0].content
         if content and content.parts:
-            extracted = "".join(p.text for p in content.parts if hasattr(p, "text") and p.text)
+            extracted = "".join(
+                p.text for p in content.parts
+                if hasattr(p, "text") and p.text and not getattr(p, "thought", False)
+            )
 
     if not extracted:
+        finish_reason = None
+        if response.candidates:
+            finish_reason = getattr(response.candidates[0], "finish_reason", None)
         raise ValueError(
-            f"Gemini no pudo extraer texto de '{path.name}'. "
-            "El PDF puede tener calidad de escaneo muy baja o estar protegido con contraseña. "
-            "Intenta exportarlo como .docx desde Word/Acrobat e intenta de nuevo."
+            f"Gemini OCR no pudo extraer texto de '{path.name}' "
+            f"(finish_reason={finish_reason}). "
+            "El PDF puede estar protegido con contraseña o la calidad del escaneo es muy baja."
         )
+
     prefix = f"[Documento PDF: {label or path.name}]\n\n" if label else f"[{path.name}]\n\n"
     text = prefix + extracted
-    print(f"  ✓ {label or path.name} cargado ({len(text):,} caracteres)")
+    print(f"  ✓ {label or path.name} cargado ({len(text):,} caracteres) [Gemini OCR]")
+    return text
     return text
 
 

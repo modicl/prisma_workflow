@@ -145,16 +145,20 @@ async def run_workflow(paci_path: str, material_path: str, prompt: str = "", use
     # Persistir reporte de tokens
     _save_token_report(session.id, tracker, results["status"])
 
-    # Exportar a DOCX
-    print("[Generando archivo DOCX...]")
+    # Exportar a DOCX solo si hay rúbrica generada
+    # (hitl_rejected y timeout terminan sin rúbrica → no se genera documento)
     docx_path = None
-    try:
-        base_name = os.path.basename(material_path).split('.')[0]
-        output_name = f"rubrica_adaptada_{base_name}.docx"
-        docx_path = export_results_to_docx(results, output_filename=output_name)
-        results["docx_path"] = str(docx_path)
-    except Exception as e:
-        print(f"  x Error al exportar a DOCX: {e}\n")
+    if results.get("rubrica_final"):
+        print("[Generando archivo DOCX...]")
+        try:
+            base_name = os.path.basename(material_path).split('.')[0]
+            output_name = f"rubrica_adaptada_{base_name}.docx"
+            docx_path = export_results_to_docx(results, output_filename=output_name)
+            results["docx_path"] = str(docx_path)
+        except Exception as e:
+            print(f"  x Error al exportar a DOCX: {e}\n")
+    else:
+        print(f"  ℹ Sin rúbrica generada (estado: {results['status']}) — DOCX omitido.")
 
     # Resumen final — el contenido queda en el DOCX, no en consola
     print(f"\n{'='*60}")

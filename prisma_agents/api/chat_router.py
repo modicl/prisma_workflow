@@ -113,20 +113,22 @@ async def get_state(session_id: str):
         if item is None:
             raise HTTPException(status_code=404, detail="Sesión no encontrada")
         return {
-            "phase":     item["phase"],
-            "messages":  item["messages"],
-            "hitl_data": item["hitl_data"],
-            "error":     item["error"],
+            "phase":           item["phase"],
+            "messages":        item["messages"],
+            "hitl_data":       item["hitl_data"],
+            "error":           item["error"],
+            "workflow_status": item.get("workflow_status"),
         }
     # Local dev fallback
     if session_id not in SESSIONS:
         raise HTTPException(status_code=404, detail="Sesión no encontrada")
     sd = SESSIONS[session_id]
     return {
-        "phase":     sd.phase,
-        "messages":  sd.messages,
-        "hitl_data": sd.hitl_data,
-        "error":     sd.error,
+        "phase":           sd.phase,
+        "messages":        sd.messages,
+        "hitl_data":       sd.hitl_data,
+        "error":           sd.error,
+        "workflow_status": sd.workflow_status,
     }
 
 
