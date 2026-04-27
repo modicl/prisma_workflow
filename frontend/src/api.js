@@ -36,3 +36,16 @@ export async function respondHitl(sessionId, { approved, reason, agentToRetry })
 export function getDownloadUrl(sessionId) {
   return `/chat/${sessionId}/download`
 }
+
+export function subscribeToSession(sessionId, onEvent, onError) {
+  const source = new EventSource(`/chat/${sessionId}/stream`)
+  source.onmessage = (e) => {
+    const event = JSON.parse(e.data)
+    if (event.type !== 'ping') onEvent(event)
+  }
+  source.onerror = () => {
+    onError?.()
+    source.close()
+  }
+  return () => source.close()
+}

@@ -10,6 +10,7 @@ class SessionData:
     phase: str = "running"
     messages: list = field(default_factory=list)
     hitl_response_queue: asyncio.Queue = field(default_factory=asyncio.Queue)
+    event_queue: asyncio.Queue = field(default_factory=asyncio.Queue)
     hitl_data: Optional[dict] = None
     result: Optional[dict] = None
     docx_path: Optional[str] = None
