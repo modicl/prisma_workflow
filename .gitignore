@@ -6,6 +6,7 @@ venv/
 
 docs/
 docs_test/
+superpowers/
 
 .pytest_cache/
 **/.pytest_cache/
