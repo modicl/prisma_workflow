@@ -2,37 +2,74 @@ import { useState, useEffect, useRef } from 'react'
 import MessageBubble from './MessageBubble'
 import HitlCard from './HitlCard'
 import Spinner from './Spinner'
-import { getSessionState, respondHitl, getDownloadUrl } from '../api'
+import { getSessionState, respondHitl, getDownloadUrl, subscribeToSession } from '../api'
 
 export default function ChatWindow({ sessionId }) {
   const [phase, setPhase] = useState('running')
   const [messages, setMessages] = useState([])
   const [hitlData, setHitlData] = useState(null)
   const [error, setError] = useState(null)
+  const [currentStep, setCurrentStep] = useState('Iniciando...')
   const bottomRef = useRef(null)
 
+  // Hidratación inicial — recupera estado en caso de recarga de página
   useEffect(() => {
-    if (phase !== 'running') return
-
-    const interval = setInterval(async () => {
-      try {
-        const data = await getSessionState(sessionId)
+    getSessionState(sessionId)
+      .then(data => {
         setMessages(data.messages || [])
+        setPhase(data.phase)
         if (data.hitl_data) setHitlData(data.hitl_data)
         if (data.error) setError(data.error)
-        setPhase(data.phase)
-      } catch (err) {
-        setError(err.message)
-        setPhase('error')
-      }
-    }, 2000)
+        if (data.phase !== 'running') setCurrentStep('')
+      })
+      .catch(() => {})
+  }, [sessionId])
 
-    return () => clearInterval(interval)
-  }, [phase, sessionId])
+  // Suscripción SSE — reemplaza el polling cada 2s
+  useEffect(() => {
+    const cleanup = subscribeToSession(
+      sessionId,
+      (event) => {
+        if (event.type === 'agent_start') {
+          setCurrentStep(event.message || '')
+        }
+        if (event.type === 'agent_end') {
+          setCurrentStep('')
+        }
+        if (event.type === 'message') {
+          setMessages(prev => [...prev, { role: event.role, content: event.content }])
+        }
+        if (event.type === 'hitl_required') {
+          setCurrentStep('')
+          setHitlData(event.hitl_data)
+          setPhase('awaiting_hitl')
+        }
+        if (event.type === 'completed') {
+          setCurrentStep('')
+          setPhase('completed')
+        }
+        if (event.type === 'error') {
+          setCurrentStep('')
+          setPhase('error')
+          setError(event.message)
+        }
+      },
+      () => {
+        // SSE cerró inesperadamente — leer estado una vez para sincronizar
+        getSessionState(sessionId)
+          .then(data => {
+            setPhase(data.phase)
+            if (data.error) setError(data.error)
+          })
+          .catch(() => {})
+      }
+    )
+    return cleanup
+  }, [sessionId])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, hitlData, phase])
+  }, [messages, hitlData, phase, currentStep])
 
   async function handleHitlRespond(response) {
     await respondHitl(sessionId, response)
@@ -55,7 +92,7 @@ export default function ChatWindow({ sessionId }) {
               phase === 'awaiting_hitl' ? 'text-amber-500' :
               'text-blue-500'
             }>
-              {phase === 'running' && 'Procesando'}
+              {phase === 'running' && (currentStep || 'Procesando')}
               {phase === 'awaiting_hitl' && 'Esperando revisión'}
               {phase === 'completed' && 'Completado'}
               {phase === 'error' && 'Error'}

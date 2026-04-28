@@ -32,6 +32,7 @@ from agent import root_agent
 from utils.document_loader import load_document
 from utils.document_exporter import export_results_to_docx
 from utils.token_tracker import SessionTokenUsage
+from utils.input_validator import validate_prompt_docente
 
 TOKEN_REPORTS_DIR = Path(__file__).parent / "token_reports"
 
@@ -76,6 +77,9 @@ async def run_workflow(paci_path: str, material_path: str, prompt: str = "", use
     if prompt:
         print(f"  Prompt:   {prompt}")
     print(f"{'='*60}\n")
+
+    # Validar prompt antes de cargar documentos
+    validate_prompt_docente(prompt)
 
     # Cargar documentos
     print("[Cargando documentos...]")

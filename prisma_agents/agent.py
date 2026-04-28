@@ -37,6 +37,36 @@ from tools.book_repository import get_reference_materials_async
 
 _genai_client: genai.Client | None = None
 
+_SSE_MESSAGES: dict[str, str] = {
+    "Agente 1":         "Analizando PACI...",
+    "Agente 1 (retry)": "Re-analizando PACI con retroalimentación del docente...",
+    "Agente 2":         "Adaptando material educativo...",
+}
+
+
+def _get_sse_message(label: str) -> str:
+    if label in _SSE_MESSAGES:
+        return _SSE_MESSAGES[label]
+    if "Agente 3" in label:
+        return "Generando rúbrica..."
+    if "Agente Crítico" in label:
+        return "Evaluando calidad de la rúbrica..."
+    return label
+
+
+def _push_sse_event(state: dict, event_data: dict) -> None:
+    """Push an SSE event to the session queue (API mode only; no-op in CLI)."""
+    session_id = state.get("api_session_id", "")
+    if not session_id:
+        return
+    try:
+        from api.session_store import SESSIONS
+        sd = SESSIONS.get(session_id)
+        if sd:
+            sd.event_queue.put_nowait(event_data)
+    except ImportError:
+        pass
+
 
 def _get_genai_client() -> genai.Client:
     global _genai_client
@@ -157,6 +187,11 @@ async def _run_with_timeout(agent, ctx: InvocationContext, label: str) -> AsyncG
     session.state al completarse, el reintento retoma desde el punto exacto
     donde falló — los agentes anteriores ya tienen su output guardado.
     """
+    _push_sse_event(ctx.session.state, {
+        "type": "agent_start",
+        "agent": label,
+        "message": _get_sse_message(label),
+    })
     for attempt in range(1, MAX_RETRIES_ON_TIMEOUT + 2):  # +2: intento original + reintentos
         timed_out = False
         try:
@@ -180,7 +215,10 @@ async def _run_with_timeout(agent, ctx: InvocationContext, label: str) -> AsyncG
                 ctx.session.state["status"] = "timeout"
 
         if not timed_out:
+            _push_sse_event(ctx.session.state, {"type": "agent_end", "agent": label})
             return  # completó exitosamente, salir del loop de reintentos
+
+    _push_sse_event(ctx.session.state, {"type": "agent_end", "agent": label})
 
 
 class PaciWorkflowAgent(BaseAgent):

@@ -109,5 +109,6 @@ def make_adaptador_agent() -> LlmAgent:
         model=MODEL,
         instruction=INSTRUCTION,
         output_key="planificacion_adaptada",
+        include_contents="none",
         description="Adapta el material educativo base al perfil NEE del estudiante aplicando DUA y el Decreto 83/2015.",
     )

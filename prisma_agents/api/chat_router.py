@@ -1,3 +1,5 @@
+import asyncio
+import json
 import os
 import tempfile
 import uuid
@@ -104,6 +106,45 @@ async def start_chat(
         )
 
     return {"session_id": session_id}
+
+
+@router.get("/{session_id}/stream")
+async def stream_session(session_id: str):
+    """SSE endpoint — pushea eventos de progreso al frontend en tiempo real."""
+    sd = SESSIONS.get(session_id)
+    if sd is None:
+        raise HTTPException(status_code=404, detail="Sesión no encontrada")
+
+    def _terminal_event(session_data) -> dict:
+        if session_data.phase == "completed":
+            return {"type": "completed", "workflow_status": session_data.workflow_status}
+        return {"type": "error", "message": session_data.error or "El proceso fue interrumpido."}
+
+    async def generator():
+        # Si la sesión ya terminó cuando el cliente se conecta, responder de inmediato
+        if sd.phase in ("completed", "error"):
+            yield f"data: {json.dumps(_terminal_event(sd), ensure_ascii=False)}\n\n"
+            return
+
+        while True:
+            try:
+                event = await asyncio.wait_for(sd.event_queue.get(), timeout=25.0)
+            except asyncio.TimeoutError:
+                # Keepalive ping + verificación por si el workflow terminó sin pushear
+                if sd.phase in ("completed", "error"):
+                    yield f"data: {json.dumps(_terminal_event(sd), ensure_ascii=False)}\n\n"
+                    return
+                yield 'data: {"type": "ping"}\n\n'
+                continue
+            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+            if event.get("type") in ("completed", "error"):
+                return
+
+    return StreamingResponse(
+        generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/{session_id}/state")

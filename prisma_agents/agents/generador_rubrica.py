@@ -124,5 +124,6 @@ def make_generador_rubrica_agent() -> LlmAgent:
         model=MODEL,
         instruction=INSTRUCTION,
         output_key="rubrica",
+        include_contents="none",
         description="Genera una rúbrica de evaluación adaptada al perfil NEE del estudiante, cumpliendo el Decreto 83/2015.",
     )

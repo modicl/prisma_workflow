@@ -123,5 +123,6 @@ def make_analizador_paci_agent() -> LlmAgent:
         model=MODEL,
         instruction=INSTRUCTION,
         output_key="perfil_paci",
+        include_contents="none",
         description="Analiza el documento PACI y extrae NEE, perfil de aprendizaje, estrategias y objetivos del estudiante.",
     )
