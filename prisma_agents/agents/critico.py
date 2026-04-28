@@ -98,5 +98,6 @@ def make_critico_agent() -> LlmAgent:
         instruction=INSTRUCTION,
         output_key="evaluacion_critica",
         output_schema=CriticoResponse,
+        include_contents="none",
         description="Evalúa la rúbrica contra el Decreto 83/2015 y el perfil PACI. Responde en JSON.",
     )
