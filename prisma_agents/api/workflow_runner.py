@@ -10,6 +10,7 @@ import boto3
 from api import dynamo_store
 from api.session_store import SESSIONS, HITL_CALLBACKS, sync_to_dynamo
 from run import run_workflow
+from utils.input_validator import validate_prompt_docente
 
 S3_BUCKET = os.environ.get("S3_BUCKET", "")
 
@@ -54,6 +55,16 @@ async def run_workflow_for_api(
 ) -> None:
     session_data = SESSIONS.get(session_id)
     if session_data is None:
+        return
+
+    # Fail-fast: rechazar prompts demasiado cortos antes de descargar documentos de S3
+    try:
+        validate_prompt_docente(prompt)
+    except ValueError as exc:
+        session_data.error = str(exc)
+        session_data.phase = "error"
+        session_data.event_queue.put_nowait({"type": "error", "message": str(exc)})
+        _push_message(session_data, str(exc), role="error")
         return
 
     # Resolve local paths — download from S3 if keys provided
