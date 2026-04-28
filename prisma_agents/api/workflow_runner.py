@@ -63,8 +63,10 @@ async def run_workflow_for_api(
     except ValueError as exc:
         session_data.error = str(exc)
         session_data.phase = "error"
+        session_data.workflow_status = "error"
         session_data.event_queue.put_nowait({"type": "error", "message": str(exc)})
         _push_message(session_data, str(exc), role="error")
+        sync_to_dynamo(session_id, session_data)
         return
 
     # Resolve local paths — download from S3 if keys provided
