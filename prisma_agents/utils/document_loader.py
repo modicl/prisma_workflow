@@ -71,14 +71,15 @@ def _load_via_gemini(path: Path, label: str | None, suffix: str) -> str:
     doc_type = "PDF" if suffix == ".pdf" else "DOCX"
     print(f"  → Subiendo {label or path.name} a Google Files API...")
 
-    with open(path, "rb") as f:
-        uploaded = client.files.upload(
-            file=f,
-            config={"mime_type": mime_type, "display_name": path.name},
-        )
-
-    print(f"  → Extrayendo contenido con Gemini...  (puede tardar 20-60s según el documento)")
+    uploaded = None
     try:
+        with open(path, "rb") as f:
+            uploaded = client.files.upload(
+                file=f,
+                config={"mime_type": mime_type, "display_name": path.name},
+            )
+
+        print(f"  → Extrayendo contenido con Gemini...  (puede tardar 20-60s según el documento)")
         response = client.models.generate_content(
             model=_MODEL,
             contents=[
@@ -93,8 +94,12 @@ def _load_via_gemini(path: Path, label: str | None, suffix: str) -> str:
             ),
         )
     finally:
-        print(f"  → Eliminando archivo de la nube...")
-        client.files.delete(name=uploaded.name)
+        if uploaded is not None:
+            print(f"  → Eliminando archivo de la nube...")
+            try:
+                client.files.delete(name=uploaded.name)
+            except Exception:
+                pass
 
     extracted = response.text
     # response.text puede quedar vacío si el modelo activó thinking — las partes reales están en candidates

@@ -225,3 +225,24 @@ def test_load_json_returns_formatted_content(tmp_path):
     assert "alumno" in result
     assert "Juan" in result
     assert "PACI JSON" in result
+
+
+# ---------------------------------------------------------------------------
+# Upload failure handling — Fix crítico PII
+# ---------------------------------------------------------------------------
+
+def test_load_pdf_upload_failure_propagates_cleanly(tmp_path):
+    """Si files.upload falla, la excepción se propaga sin intentar delete."""
+    pdf = tmp_path / "fail_upload.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+
+    client = MagicMock()
+    client.files.upload.side_effect = RuntimeError("upload failed — quota exceeded")
+
+    with patch("utils.document_loader.genai.Client", return_value=client), \
+         patch.dict(os.environ, {"GOOGLE_API_KEY": "test-key"}):
+        with pytest.raises(RuntimeError, match="upload failed"):
+            dl.load_document(str(pdf))
+
+    # delete NO debe llamarse si upload falló (uploaded es None)
+    client.files.delete.assert_not_called()
