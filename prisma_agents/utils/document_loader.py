@@ -20,6 +20,8 @@ _MIME_TYPES = {
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 }
 
+_MODEL = "gemini-2.5-flash-lite"
+
 
 def load_document(path: str, label: str | None = None) -> str:
     """
@@ -42,9 +44,7 @@ def load_document(path: str, label: str | None = None) -> str:
 
     suffix = p.suffix.lower()
 
-    if suffix == ".pdf":
-        return _load_via_gemini(p, label, suffix)
-    elif suffix == ".docx":
+    if suffix in _MIME_TYPES:
         return _load_via_gemini(p, label, suffix)
     elif suffix == ".doc":
         raise ValueError(
@@ -80,7 +80,7 @@ def _load_via_gemini(path: Path, label: str | None, suffix: str) -> str:
     print(f"  → Extrayendo contenido con Gemini...  (puede tardar 20-60s según el documento)")
     try:
         response = client.models.generate_content(
-            model="gemini-2.5-flash-lite",
+            model=_MODEL,
             contents=[
                 uploaded,
                 "Extrae y transcribe el texto completo de este documento. "
@@ -97,6 +97,7 @@ def _load_via_gemini(path: Path, label: str | None, suffix: str) -> str:
         client.files.delete(name=uploaded.name)
 
     extracted = response.text
+    # response.text puede quedar vacío si el modelo activó thinking — las partes reales están en candidates
     if not extracted and response.candidates:
         content = response.candidates[0].content
         if content and content.parts:
