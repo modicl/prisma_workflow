@@ -1,10 +1,13 @@
 # prisma_agents/tests/test_document_loader.py
+import io
+import json
 import os
 import sys
+import zipfile
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
-from unittest.mock import patch, MagicMock, mock_open
+from unittest.mock import patch, MagicMock
 from pathlib import Path
 
 import utils.document_loader as dl
@@ -21,12 +24,15 @@ def _make_gemini_response(text: str) -> MagicMock:
     return r
 
 
-def _make_gemini_client(response_text: str) -> MagicMock:
+def _make_gemini_client(response_text: str = "", side_effect: Exception | None = None) -> MagicMock:
     uploaded = MagicMock()
     uploaded.name = "files/mock123"
     client = MagicMock()
     client.files.upload.return_value = uploaded
-    client.models.generate_content.return_value = _make_gemini_response(response_text)
+    if side_effect is not None:
+        client.models.generate_content.side_effect = side_effect
+    else:
+        client.models.generate_content.return_value = _make_gemini_response(response_text)
     return client
 
 
@@ -152,7 +158,6 @@ def test_load_pdf_no_pdfplumber_import(tmp_path):
 def test_load_docx_uses_gemini(tmp_path):
     """Un .docx debe procesarse a través de Gemini Files API."""
     # Crear un .docx mínimo válido (ZIP con structure de Word)
-    import zipfile, io
     docx = tmp_path / "guia.docx"
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as z:
@@ -175,7 +180,6 @@ def test_load_docx_uses_gemini(tmp_path):
 
 def test_load_docx_deletes_gemini_file_even_on_error(tmp_path):
     """El archivo Gemini se elimina aunque generate_content falle."""
-    import zipfile, io
     docx = tmp_path / "error.docx"
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as z:
@@ -212,7 +216,6 @@ def test_load_doc_raises_value_error(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_load_json_returns_formatted_content(tmp_path):
-    import json
     data = {"alumno": "Juan", "diagnostico": "TEA"}
     f = tmp_path / "paci.json"
     f.write_text(json.dumps(data), encoding="utf-8")
