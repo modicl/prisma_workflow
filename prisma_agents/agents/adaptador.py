@@ -68,6 +68,11 @@ Se te proporciona:
 {material_document}
 </documento_usuario>
 
+### ORIENTACIÓN DEL DOCENTE:
+<documento_usuario tipo="orientacion_docente">
+{prompt_docente}
+</documento_usuario>
+
 Tu tarea es adaptar el material educativo al perfil del estudiante:
 
 ## 1. Múltiples Medios de Representación
