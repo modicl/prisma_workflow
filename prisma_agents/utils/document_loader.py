@@ -3,11 +3,15 @@ Cargador de documentos: convierte PDF, DOCX y JSON a texto plano
 para inyectar en el session.state de Google ADK.
 
 PDFs pasan por Gemini Files API (OCR multimodal) para manejar documentos
-digitales, escaneados y mixtos. DOCX se extrae localmente con python-docx.
+digitales, escaneados y mixtos. DOCX se extrae localmente con python-docx;
+si el texto extraído es insuficiente (DOCX escaneado), se aplica OCR inline
+sobre las imágenes embebidas usando Gemini.
 """
 
+import base64
 import json
 import os
+import zipfile
 from pathlib import Path
 
 from docx import Document
@@ -17,6 +21,16 @@ from google.genai import types as genai_types
 
 _PDF_MIME = "application/pdf"
 _MODEL = "gemini-2.5-flash-lite"
+MIN_TEXT_CHARS = 200  # umbral mínimo para considerar que python-docx extrajo contenido útil
+
+_IMAGE_MIMES = {
+    ".png":  "image/png",
+    ".jpg":  "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif":  "image/gif",
+    ".webp": "image/webp",
+    ".bmp":  "image/bmp",
+}
 
 
 def load_document(path: str, label: str | None = None) -> str:
@@ -32,7 +46,7 @@ def load_document(path: str, label: str | None = None) -> str:
 
     Raises:
         FileNotFoundError: Si el archivo no existe.
-        ValueError: Si la extensión no está soportada o Gemini no pudo extraer texto.
+        ValueError: Si la extensión no está soportada o no se pudo extraer texto.
     """
     p = Path(path)
     if not p.exists():
@@ -123,28 +137,111 @@ def _load_pdf_via_gemini(path: Path, label: str | None) -> str:
 
 
 def _load_docx(path: Path, label: str | None) -> str:
-    """Extrae texto de un DOCX localmente usando python-docx."""
+    """
+    Extrae texto de un DOCX. Usa python-docx como método principal.
+    Si el texto extraído es insuficiente (DOCX escaneado), aplica OCR
+    sobre las imágenes embebidas usando Gemini inline.
+    """
     doc = Document(str(path))
 
     parts: list[str] = []
-
     for para in doc.paragraphs:
         if para.text.strip():
             parts.append(para.text)
-
     for table in doc.tables:
         for row in table.rows:
             row_text = " | ".join(cell.text.strip() for cell in row.cells if cell.text.strip())
             if row_text:
                 parts.append(row_text)
 
-    if not parts:
-        raise ValueError(f"No se pudo extraer texto de '{path.name}'. El archivo puede estar vacío o dañado.")
+    text_from_xml = "\n".join(parts)
+
+    if len(text_from_xml) >= MIN_TEXT_CHARS:
+        prefix = f"[Documento DOCX: {label or path.name}]\n\n" if label else f"[{path.name}]\n\n"
+        text = prefix + text_from_xml
+        print(f"  ✓ {label or path.name} cargado ({len(text):,} caracteres) [local]")
+        return text
+
+    # Texto insuficiente — intentar OCR sobre imágenes embebidas
+    print(f"  → Texto insuficiente en '{path.name}' ({len(text_from_xml)} chars). "
+          "Buscando imágenes para OCR...")
+    images = _extract_docx_images(path)
+
+    if not images:
+        if text_from_xml.strip():
+            prefix = f"[Documento DOCX: {label or path.name}]\n\n" if label else f"[{path.name}]\n\n"
+            return prefix + text_from_xml
+        raise ValueError(
+            f"No se pudo extraer texto de '{path.name}'. "
+            "El archivo parece estar vacío. "
+            "Si contiene páginas escaneadas, conviértelo a PDF e intenta de nuevo."
+        )
+
+    ocr_text = _ocr_images_with_gemini(images, path.name)
+    combined = "\n\n".join(filter(None, [text_from_xml, ocr_text]))
 
     prefix = f"[Documento DOCX: {label or path.name}]\n\n" if label else f"[{path.name}]\n\n"
-    text = prefix + "\n".join(parts)
-    print(f"  ✓ {label or path.name} cargado ({len(text):,} caracteres) [local]")
+    text = prefix + combined
+    print(f"  ✓ {label or path.name} cargado ({len(text):,} caracteres) [local + OCR Gemini]")
     return text
+
+
+def _extract_docx_images(path: Path) -> list[dict]:
+    """
+    Extrae imágenes embebidas de un DOCX (que internamente es un ZIP).
+    Retorna lista de dicts con 'mime_type' y 'data' (bytes).
+    """
+    images = []
+    with zipfile.ZipFile(path, "r") as z:
+        for name in z.namelist():
+            if not name.startswith("word/media/"):
+                continue
+            ext = Path(name).suffix.lower()
+            mime = _IMAGE_MIMES.get(ext)
+            if mime is None:
+                continue
+            images.append({"mime_type": mime, "data": z.read(name)})
+    return images
+
+
+def _ocr_images_with_gemini(images: list[dict], filename: str) -> str:
+    """
+    Envía imágenes a Gemini como datos inline (sin Files API) y retorna el texto extraído.
+    """
+    client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY"))
+    print(f"  → Aplicando OCR con Gemini sobre {len(images)} imagen(es) de '{filename}'...")
+
+    ocr_parts: list = []
+    for img in images:
+        ocr_parts.append({
+            "inline_data": {
+                "mime_type": img["mime_type"],
+                "data": base64.b64encode(img["data"]).decode("utf-8"),
+            }
+        })
+    ocr_parts.append(
+        "Extrae y transcribe todo el texto visible en estas imágenes. "
+        "Incluye párrafos, tablas, encabezados y cualquier texto legible. "
+        "Transcribe fielmente sin agregar interpretaciones ni resúmenes."
+    )
+
+    response = client.models.generate_content(
+        model=_MODEL,
+        contents=ocr_parts,
+        config=genai_types.GenerateContentConfig(
+            thinking_config=genai_types.ThinkingConfig(thinking_budget=0),
+        ),
+    )
+
+    extracted = response.text
+    if not extracted and response.candidates:
+        content = response.candidates[0].content
+        if content and content.parts:
+            extracted = "".join(
+                p.text for p in content.parts
+                if hasattr(p, "text") and p.text and not getattr(p, "thought", False)
+            )
+    return extracted or ""
 
 
 def _load_json(path: Path, label: str | None) -> str:
