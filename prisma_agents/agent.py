@@ -27,6 +27,7 @@ from google.adk.events import Event
 from typing import AsyncGenerator
 from google import genai
 from google.genai import types as genai_types
+from google.genai.errors import ServerError
 
 from agents.analizador_paci import make_analizador_paci_agent
 from agents.adaptador import make_adaptador_agent
@@ -175,7 +176,8 @@ MAX_ITERATIONS = 3
 MAX_HITL_ITERATIONS = 3          # intentos de revisión del profesor
 AGENT_TIMEOUT_SECONDS = 90   # segundos por agente antes de considerar timeout
 MAX_RETRIES_ON_TIMEOUT = 2   # reintentos adicionales si el agente hace timeout
-RETRY_DELAY_SECONDS = 5      # espera entre reintentos
+RETRY_DELAY_SECONDS = 5      # espera entre reintentos de timeout
+_503_RETRY_DELAYS = [15, 30] # backoff en segundos para errores 503 de Gemini
 
 
 async def _run_with_timeout(agent, ctx: InvocationContext, label: str) -> AsyncGenerator[Event, None]:
@@ -194,6 +196,7 @@ async def _run_with_timeout(agent, ctx: InvocationContext, label: str) -> AsyncG
     })
     for attempt in range(1, MAX_RETRIES_ON_TIMEOUT + 2):  # +2: intento original + reintentos
         timed_out = False
+        server_error = False
         try:
             async with asyncio.timeout(AGENT_TIMEOUT_SECONDS):
                 async for event in agent.run_async(ctx):
@@ -213,8 +216,19 @@ async def _run_with_timeout(agent, ctx: InvocationContext, label: str) -> AsyncG
                     f"sin respuesta. Abortando flujo.\n"
                 )
                 ctx.session.state["status"] = "timeout"
+        except ServerError as exc:
+            if exc.code == 503 and attempt <= len(_503_RETRY_DELAYS):
+                delay = _503_RETRY_DELAYS[attempt - 1]
+                server_error = True
+                print(
+                    f"\n🔄 503 UNAVAILABLE: {label} (intento {attempt}/{len(_503_RETRY_DELAYS) + 1}). "
+                    f"Gemini con alta demanda — reintentando en {delay}s...\n"
+                )
+                await asyncio.sleep(delay)
+            else:
+                raise
 
-        if not timed_out:
+        if not timed_out and not server_error:
             _push_sse_event(ctx.session.state, {"type": "agent_end", "agent": label})
             return  # completó exitosamente, salir del loop de reintentos
 

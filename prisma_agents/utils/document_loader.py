@@ -2,24 +2,20 @@
 Cargador de documentos: convierte PDF, DOCX y JSON a texto plano
 para inyectar en el session.state de Google ADK.
 
-Toda la extracción de PDF y DOCX pasa por Gemini Files API (OCR multimodal),
-lo que garantiza extracción completa en documentos mixtos (páginas digitales
-+ páginas escaneadas) sin pérdida de contenido.
+PDFs pasan por Gemini Files API (OCR multimodal) para manejar documentos
+digitales, escaneados y mixtos. DOCX se extrae localmente con python-docx.
 """
 
 import json
 import os
 from pathlib import Path
 
+from docx import Document
 from google import genai
 from google.genai import types as genai_types
 
 
-_MIME_TYPES = {
-    ".pdf":  "application/pdf",
-    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-}
-
+_PDF_MIME = "application/pdf"
 _MODEL = "gemini-2.5-flash-lite"
 
 
@@ -44,8 +40,10 @@ def load_document(path: str, label: str | None = None) -> str:
 
     suffix = p.suffix.lower()
 
-    if suffix in _MIME_TYPES:
-        return _load_via_gemini(p, label, suffix)
+    if suffix == ".pdf":
+        return _load_pdf_via_gemini(p, label)
+    elif suffix == ".docx":
+        return _load_docx(p, label)
     elif suffix == ".doc":
         raise ValueError(
             f"El archivo '{p.name}' está en formato .doc (Word 97-2003), que no es compatible.\n"
@@ -57,18 +55,16 @@ def load_document(path: str, label: str | None = None) -> str:
         raise ValueError(f"Formato no soportado: '{suffix}'. Use .pdf, .docx o .json")
 
 
-def _load_via_gemini(path: Path, label: str | None, suffix: str) -> str:
+def _load_pdf_via_gemini(path: Path, label: str | None) -> str:
     """
-    Sube el documento a la Files API de Gemini y extrae su contenido completo.
+    Sube el PDF a la Files API de Gemini y extrae su contenido completo.
 
     Aplica OCR multimodal que maneja correctamente PDFs digitales, escaneados
     y mixtos (texto + imágenes en el mismo documento). El archivo se elimina
     de la nube inmediatamente tras la extracción (requerimiento PII).
     """
-    mime_type = _MIME_TYPES[suffix]
     client = genai.Client(api_key=os.environ.get("GOOGLE_API_KEY"))
 
-    doc_type = "PDF" if suffix == ".pdf" else "DOCX"
     print(f"  → Subiendo {label or path.name} a Google Files API...")
 
     uploaded = None
@@ -76,7 +72,7 @@ def _load_via_gemini(path: Path, label: str | None, suffix: str) -> str:
         with open(path, "rb") as f:
             uploaded = client.files.upload(
                 file=f,
-                config={"mime_type": mime_type, "display_name": path.name},
+                config={"mime_type": _PDF_MIME, "display_name": path.name},
             )
 
         print(f"  → Extrayendo contenido con Gemini...  (puede tardar 20-60s según el documento)")
@@ -102,7 +98,6 @@ def _load_via_gemini(path: Path, label: str | None, suffix: str) -> str:
                 pass
 
     extracted = response.text
-    # response.text puede quedar vacío si el modelo activó thinking — las partes reales están en candidates
     if not extracted and response.candidates:
         content = response.candidates[0].content
         if content and content.parts:
@@ -121,9 +116,34 @@ def _load_via_gemini(path: Path, label: str | None, suffix: str) -> str:
             "El documento puede estar protegido con contraseña o dañado."
         )
 
-    prefix = f"[Documento {doc_type}: {label or path.name}]\n\n" if label else f"[{path.name}]\n\n"
+    prefix = f"[Documento PDF: {label or path.name}]\n\n" if label else f"[{path.name}]\n\n"
     text = prefix + extracted
     print(f"  ✓ {label or path.name} cargado ({len(text):,} caracteres) [Gemini]")
+    return text
+
+
+def _load_docx(path: Path, label: str | None) -> str:
+    """Extrae texto de un DOCX localmente usando python-docx."""
+    doc = Document(str(path))
+
+    parts: list[str] = []
+
+    for para in doc.paragraphs:
+        if para.text.strip():
+            parts.append(para.text)
+
+    for table in doc.tables:
+        for row in table.rows:
+            row_text = " | ".join(cell.text.strip() for cell in row.cells if cell.text.strip())
+            if row_text:
+                parts.append(row_text)
+
+    if not parts:
+        raise ValueError(f"No se pudo extraer texto de '{path.name}'. El archivo puede estar vacío o dañado.")
+
+    prefix = f"[Documento DOCX: {label or path.name}]\n\n" if label else f"[{path.name}]\n\n"
+    text = prefix + "\n".join(parts)
+    print(f"  ✓ {label or path.name} cargado ({len(text):,} caracteres) [local]")
     return text
 
 
