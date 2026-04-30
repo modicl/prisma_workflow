@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import { startChat } from '../api'
+import { startChat, AuthError } from '../api'
 
 function FileDropZone({ label, file, onChange }) {
   const inputRef = useRef(null)
@@ -38,7 +38,7 @@ function FileDropZone({ label, file, onChange }) {
   )
 }
 
-export default function UploadForm({ onStart }) {
+export default function UploadForm({ onStart, onAuthError }) {
   const [paciFile, setPaciFile] = useState(null)
   const [materialFile, setMaterialFile] = useState(null)
   const [prompt, setPrompt] = useState('')
@@ -57,6 +57,7 @@ export default function UploadForm({ onStart }) {
       const { session_id } = await startChat({ paciFile, materialFile, prompt })
       onStart(session_id)
     } catch (err) {
+      if (err instanceof AuthError) { onAuthError?.(err); return }
       setError(err.message)
       setLoading(false)
     }

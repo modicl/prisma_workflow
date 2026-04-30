@@ -2,9 +2,9 @@ import { useState, useEffect, useRef } from 'react'
 import MessageBubble from './MessageBubble'
 import HitlCard from './HitlCard'
 import Spinner from './Spinner'
-import { getSessionState, respondHitl, getDownloadUrl, subscribeToSession } from '../api'
+import { getSessionState, respondHitl, getDownloadUrl, subscribeToSession, AuthError } from '../api'
 
-export default function ChatWindow({ sessionId }) {
+export default function ChatWindow({ sessionId, onAuthError }) {
   const [phase, setPhase] = useState('running')
   const [messages, setMessages] = useState([])
   const [hitlData, setHitlData] = useState(null)
@@ -22,7 +22,7 @@ export default function ChatWindow({ sessionId }) {
         if (data.error) setError(data.error)
         if (data.phase !== 'running') setCurrentStep('')
       })
-      .catch(() => {})
+      .catch(err => onAuthError?.(err))
   }, [sessionId])
 
   // Suscripción SSE — reemplaza el polling cada 2s
@@ -61,7 +61,7 @@ export default function ChatWindow({ sessionId }) {
             setPhase(data.phase)
             if (data.error) setError(data.error)
           })
-          .catch(() => {})
+          .catch(err => onAuthError?.(err))
       }
     )
     return cleanup
@@ -72,9 +72,13 @@ export default function ChatWindow({ sessionId }) {
   }, [messages, hitlData, phase, currentStep])
 
   async function handleHitlRespond(response) {
-    await respondHitl(sessionId, response)
-    setHitlData(null)
-    setPhase('running')
+    try {
+      await respondHitl(sessionId, response)
+      setHitlData(null)
+      setPhase('running')
+    } catch (err) {
+      onAuthError?.(err)
+    }
   }
 
   return (
