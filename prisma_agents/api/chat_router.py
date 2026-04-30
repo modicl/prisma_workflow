@@ -7,11 +7,12 @@ from pathlib import Path
 from typing import Optional
 
 import boto3
-from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Header, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Header, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from api import dynamo_store
+from api.auth import get_current_user
 from api.session_store import SESSIONS, SessionData, sync_to_dynamo
 from api.workflow_runner import run_workflow_for_api
 
@@ -53,6 +54,7 @@ async def start_chat(
     material_file: UploadFile = File(...),
     prompt: str = Form(""),
     school_id: str = Form("colegio_demo"),
+    _user: dict = Depends(get_current_user),
 ):
     session_id = str(uuid.uuid4())
     paci_ext = _safe_ext(paci_file.filename, ".pdf")
@@ -109,7 +111,7 @@ async def start_chat(
 
 
 @router.get("/{session_id}/stream")
-async def stream_session(session_id: str):
+async def stream_session(session_id: str, _user: dict = Depends(get_current_user)):
     """SSE endpoint — pushea eventos de progreso al frontend en tiempo real."""
     sd = SESSIONS.get(session_id)
     if sd is None:
@@ -148,7 +150,7 @@ async def stream_session(session_id: str):
 
 
 @router.get("/{session_id}/state")
-async def get_state(session_id: str):
+async def get_state(session_id: str, _user: dict = Depends(get_current_user)):
     if dynamo_store.enabled():
         item = dynamo_store.get_session(session_id)
         if item is None:
@@ -174,7 +176,7 @@ async def get_state(session_id: str):
 
 
 @router.post("/{session_id}/hitl")
-async def respond_hitl(session_id: str, body: HitlResponseBody):
+async def respond_hitl(session_id: str, body: HitlResponseBody, _user: dict = Depends(get_current_user)):
     sd = SESSIONS.get(session_id)
     if sd is None:
         raise HTTPException(status_code=404, detail="Sesión no encontrada")
@@ -189,7 +191,7 @@ async def respond_hitl(session_id: str, body: HitlResponseBody):
 
 
 @router.get("/{session_id}/download")
-async def download_result(session_id: str):
+async def download_result(session_id: str, _user: dict = Depends(get_current_user)):
     if dynamo_store.enabled():
         item = dynamo_store.get_session(session_id)
         if item is None:

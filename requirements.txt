@@ -9,3 +9,4 @@ boto3==1.38.0
 python-multipart==0.0.22
 httpx==0.28.1
 pytest-asyncio==0.24.0
+PyJWT==2.9.0
