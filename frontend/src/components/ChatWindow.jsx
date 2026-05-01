@@ -25,17 +25,40 @@ export default function ChatWindow({ sessionId, onAuthError }) {
       .catch(err => onAuthError?.(err))
   }, [sessionId])
 
-  // Suscripción SSE — reemplaza el polling cada 2s
+  // Suscripción SSE con fallback a polling cuando el stream no está disponible
   useEffect(() => {
+    let pollInterval = null
+
+    const syncState = () =>
+      getSessionState(sessionId)
+        .then(data => {
+          setMessages(data.messages || [])
+          setPhase(data.phase)
+          if (data.hitl_data) setHitlData(data.hitl_data)
+          if (data.error) setError(data.error)
+          if (data.phase !== 'running' && data.phase !== 'awaiting_hitl') {
+            setCurrentStep('')
+          }
+          return data.phase
+        })
+        .catch(err => { onAuthError?.(err); return 'error' })
+
+    const startPolling = () => {
+      if (pollInterval) return
+      pollInterval = setInterval(async () => {
+        const phase = await syncState()
+        if (phase !== 'running' && phase !== 'awaiting_hitl') {
+          clearInterval(pollInterval)
+          pollInterval = null
+        }
+      }, 3000)
+    }
+
     const cleanup = subscribeToSession(
       sessionId,
       (event) => {
-        if (event.type === 'agent_start') {
-          setCurrentStep(event.message || '')
-        }
-        if (event.type === 'agent_end') {
-          setCurrentStep('')
-        }
+        if (event.type === 'agent_start') setCurrentStep(event.message || '')
+        if (event.type === 'agent_end') setCurrentStep('')
         if (event.type === 'message') {
           setMessages(prev => [...prev, { role: event.role, content: event.content }])
         }
@@ -55,16 +78,17 @@ export default function ChatWindow({ sessionId, onAuthError }) {
         }
       },
       () => {
-        // SSE cerró inesperadamente — leer estado una vez para sincronizar
-        getSessionState(sessionId)
-          .then(data => {
-            setPhase(data.phase)
-            if (data.error) setError(data.error)
-          })
-          .catch(err => onAuthError?.(err))
+        // SSE cerró o falló — sincronizar estado y activar polling si sigue corriendo
+        syncState().then(phase => {
+          if (phase === 'running' || phase === 'awaiting_hitl') startPolling()
+        })
       }
     )
-    return cleanup
+
+    return () => {
+      cleanup()
+      if (pollInterval) clearInterval(pollInterval)
+    }
   }, [sessionId])
 
   useEffect(() => {

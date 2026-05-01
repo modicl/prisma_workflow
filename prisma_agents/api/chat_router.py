@@ -114,6 +114,16 @@ async def start_chat(
 async def stream_session(session_id: str, _user: dict = Depends(get_current_user)):
     """SSE endpoint — pushea eventos de progreso al frontend en tiempo real."""
     sd = SESSIONS.get(session_id)
+
+    # La sesión puede existir en DynamoDB (creada por ms-docs) pero aún no en memoria
+    # porque el Lambda todavía no llamó a /internal/run. Esperar hasta 15s.
+    if sd is None and dynamo_store.enabled():
+        for _ in range(30):
+            await asyncio.sleep(0.5)
+            sd = SESSIONS.get(session_id)
+            if sd is not None:
+                break
+
     if sd is None:
         raise HTTPException(status_code=404, detail="Sesión no encontrada")
 
@@ -145,7 +155,12 @@ async def stream_session(session_id: str, _user: dict = Depends(get_current_user
     return StreamingResponse(
         generator(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+            "Content-Encoding": "identity",
+        },
     )
 
 
@@ -190,6 +205,9 @@ async def respond_hitl(session_id: str, body: HitlResponseBody, _user: dict = De
     return {"ok": True}
 
 
+DOWNLOAD_URL_EXPIRES = int(os.environ.get("DOWNLOAD_URL_EXPIRES", "300"))
+
+
 @router.get("/{session_id}/download")
 async def download_result(session_id: str, _user: dict = Depends(get_current_user)):
     if dynamo_store.enabled():
@@ -199,13 +217,17 @@ async def download_result(session_id: str, _user: dict = Depends(get_current_use
         if item.get("phase") != "completed" or not item.get("docx_s3_key"):
             raise HTTPException(status_code=404, detail="Resultado no disponible aún")
         s3 = boto3.client("s3", region_name=os.environ.get("AWS_REGION", "us-east-1"))
-        s3_obj = s3.get_object(Bucket=S3_BUCKET, Key=item["docx_s3_key"])
         filename = Path(item["docx_s3_key"]).name
-        return StreamingResponse(
-            s3_obj["Body"].iter_chunks(),
-            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        presigned_url = s3.generate_presigned_url(
+            "get_object",
+            Params={
+                "Bucket": S3_BUCKET,
+                "Key": item["docx_s3_key"],
+                "ResponseContentDisposition": f'attachment; filename="{filename}"',
+            },
+            ExpiresIn=DOWNLOAD_URL_EXPIRES,
         )
+        return {"url": presigned_url, "filename": filename, "expires_in": DOWNLOAD_URL_EXPIRES}
 
     # Local dev fallback
     if session_id not in SESSIONS:
