@@ -46,7 +46,14 @@ class CORSMiddleware:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from utils.tracing import setup_tracing
+    setup_tracing()
     yield
+    try:
+        from langfuse import get_client
+        get_client().flush()
+    except Exception:
+        pass
 
 
 app = FastAPI(title="PRISMA Chat API", lifespan=lifespan)

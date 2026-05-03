@@ -21,6 +21,9 @@ from dotenv import load_dotenv
 # Carga .env desde la carpeta del script
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
+from utils.tracing import setup_tracing
+setup_tracing()
+
 from google.adk.runners import Runner
 from google.adk.sessions.database_session_service import DatabaseSessionService
 from google.adk.plugins.logging_plugin import LoggingPlugin
@@ -123,14 +126,24 @@ async def run_workflow(paci_path: str, material_path: str, prompt: str = "", use
 
     tracker = SessionTokenUsage()
 
-    async for event in runner.run_async(
+    from langfuse import propagate_attributes
+    trace_session_id = api_session_id if api_session_id else effective_user_id
+    metadata = {"school_id": school_id} if school_id else {}
+
+    with propagate_attributes(
         user_id=effective_user_id,
-        session_id=session.id,
-        new_message=Content(parts=[Part(text=mensaje_inicial)]),
+        session_id=trace_session_id,
+        trace_name="paci-workflow",
+        metadata=metadata,
     ):
-        # Capturar tokens por agente
-        author = getattr(event, "author", None) or "unknown"
-        tracker.add_event(author, event)
+        async for event in runner.run_async(
+            user_id=effective_user_id,
+            session_id=session.id,
+            new_message=Content(parts=[Part(text=mensaje_inicial)]),
+        ):
+            # Capturar tokens por agente
+            author = getattr(event, "author", None) or "unknown"
+            tracker.add_event(author, event)
 
     # Recuperar resultados del estado de sesión
     final_session = await session_service.get_session(
@@ -174,6 +187,13 @@ async def run_workflow(paci_path: str, material_path: str, prompt: str = "", use
     else:
         print("  Archivo: no generado (ver error arriba)")
     print(f"{'='*60}\n")
+
+    # Flush Langfuse traces before returning (critical for CLI mode — process exits after this)
+    try:
+        from langfuse import get_client
+        get_client().flush()
+    except Exception:
+        pass
 
     return results
 

@@ -10,3 +10,5 @@ python-multipart==0.0.22
 httpx==0.28.1
 pytest-asyncio==0.24.0
 PyJWT==2.9.0
+langfuse==4.5.1
+openinference-instrumentation-google-adk==0.1.10
