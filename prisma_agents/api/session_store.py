@@ -1,6 +1,6 @@
 import asyncio
 from dataclasses import dataclass, field
-from typing import Awaitable, Callable, Optional
+from typing import Awaitable, Callable, Optional, TYPE_CHECKING
 
 from api import dynamo_store
 
@@ -15,7 +15,9 @@ class SessionData:
     result: Optional[dict] = None
     docx_path: Optional[str] = None
     error: Optional[str] = None
-    workflow_status: Optional[str] = None  # "success" | "degraded" | "hitl_rejected" | "error"
+    workflow_status: Optional[str] = None  # "success" | "degraded" | "hitl_rejected" | "error" | "cancelled"
+    cancelled: bool = False
+    task: Optional[asyncio.Task] = field(default=None, repr=False, compare=False)
 
 
 HitlCallback = Callable[[dict, int, int], Awaitable[tuple[bool, str, int]]]

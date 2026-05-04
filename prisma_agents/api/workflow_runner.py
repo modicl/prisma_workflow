@@ -100,6 +100,12 @@ async def run_workflow_for_api(
         sync_to_dynamo(session_id, session_data)
 
         response = await session_data.hitl_response_queue.get()
+
+        # Si la sesión fue cancelada mientras esperábamos, salir sin sobreescribir el estado
+        if session_data.cancelled:
+            hitl_was_rejected[0] = True
+            return False, "Sesión cancelada por el docente.", 0
+
         session_data.phase = "running"
         session_data.hitl_data = None
         sync_to_dynamo(session_id, session_data)
@@ -119,6 +125,12 @@ async def run_workflow_for_api(
     HITL_CALLBACKS[session_id] = hitl_callback
 
     try:
+        # Simulación de flujo para pruebas de UX/UI sin consumir tokens LLM
+        if school_id and school_id.startswith("__mock"):
+            from api.mock_runner import run_mock_workflow
+            await run_mock_workflow(session_id, session_data, school_id)
+            return
+
         _push_message(session_data, "Documentos recibidos. Iniciando análisis del PACI...")
         sync_to_dynamo(session_id, session_data)
 
@@ -130,6 +142,10 @@ async def run_workflow_for_api(
             school_id=school_id,
             api_session_id=session_id,
         )
+
+        # Si fue cancelada mientras corría un agente, no sobreescribir el estado
+        if session_data.cancelled:
+            return
 
         # hitl_was_rejected es la fuente de verdad: no depende de que ADK
         # persista ctx.session.state en el return temprano del agente.
