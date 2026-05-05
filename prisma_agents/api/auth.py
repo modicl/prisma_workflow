@@ -14,7 +14,10 @@ def _get_jwks_client() -> PyJWKClient:
     if _jwks_client is None:
         if not SUPABASE_URL:
             raise HTTPException(status_code=500, detail="SUPABASE_URL no configurado")
-        _jwks_client = PyJWKClient(f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json")
+        _jwks_client = PyJWKClient(
+            f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json",
+            lifespan=300,
+        )
     return _jwks_client
 
 
