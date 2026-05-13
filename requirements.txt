@@ -1,12 +1,29 @@
+# ── Agentes IA ───────────────────────────────────────────────────
 google-adk==1.28.0
 google-genai==1.70.0
-python-docx==1.2.0
-python-dotenv==1.2.2
+
+# ── API y servidor ────────────────────────────────────────────────
 fastapi==0.135.3
 uvicorn==0.34.0
-asyncpg==0.30.0
-boto3==1.38.0
 python-multipart==0.0.22
 httpx==0.28.1
-pytest-asyncio==0.24.0
+
+# ── Autenticación JWT ─────────────────────────────────────────────
 PyJWT==2.9.0
+cryptography>=41.0.0        # requerido por PyJWT para verificar ES256 (Supabase JWKS)
+
+# ── AWS ───────────────────────────────────────────────────────────
+boto3==1.38.0
+
+# ── Base de datos ─────────────────────────────────────────────────
+asyncpg==0.30.0
+
+# ── Documentos ────────────────────────────────────────────────────
+python-docx==1.2.0
+
+# ── Configuración ─────────────────────────────────────────────────
+python-dotenv==1.2.2
+
+# ── Tests ─────────────────────────────────────────────────────────
+pytest>=8.0.0
+pytest-asyncio==0.24.0
