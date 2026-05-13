@@ -97,3 +97,6 @@ def test_normalize_subject_none_when_not_in_prompt():
 
 def test_normalize_grade_none_when_not_in_prompt():
     assert normalize_grade("el estudiante tiene dificultades de lectura") is None
+
+def test_normalize_subject_empty_string_returns_none():
+    assert normalize_subject('') is None

@@ -1,3 +1,4 @@
+import io
 import json
 import sys
 import os
@@ -157,7 +158,11 @@ def test_get_reference_materials_s3_error_returns_empty():
 
 def test_transcribe_material_pdf_happy_path_and_cleanup():
     """Verifica el happy path con PDF y que el finally limpia temp file y archivo Gemini."""
+    body_mock = MagicMock()
+    body_mock.read.return_value = b"%PDF fake content"
     mock_s3 = MagicMock()
+    mock_s3.get_object.return_value = {"Body": body_mock}
+
     mock_uploaded_file = MagicMock()
     mock_uploaded_file.name = "files/abc123"
 
@@ -181,18 +186,21 @@ def test_transcribe_material_pdf_happy_path_and_cleanup():
     mock_unlink.assert_called_once()
 
 
-def test_transcribe_material_docx_uses_correct_mime_type():
-    """Verifica que un .docx usa el mime type de Word, no de PDF."""
-    mock_s3 = MagicMock()
-    mock_uploaded_file = MagicMock()
-    mock_uploaded_file.name = "files/xyz"
+def test_transcribe_material_docx_extracts_text_locally():
+    """Para .docx, el texto se extrae del ZIP local sin llamar a Gemini."""
+    from docx import Document as DocxDocument
+    buf = io.BytesIO()
+    d = DocxDocument()
+    d.add_paragraph("Texto extraído del Word.")
+    d.save(buf)
+    docx_bytes = buf.getvalue()
 
-    mock_response = MagicMock()
-    mock_response.text = "Contenido del Word transcrito"
+    body_mock = MagicMock()
+    body_mock.read.return_value = docx_bytes
+    mock_s3 = MagicMock()
+    mock_s3.get_object.return_value = {"Body": body_mock}
 
     mock_client = MagicMock()
-    mock_client.files.upload.return_value = mock_uploaded_file
-    mock_client.models.generate_content.return_value = mock_response
 
     with patch("tools.book_repository._get_s3_client", return_value=mock_s3), \
          patch("tools.book_repository.genai.Client", return_value=mock_client), \
@@ -200,10 +208,9 @@ def test_transcribe_material_docx_uses_correct_mime_type():
          patch.dict(os.environ, {"S3_BUCKET_NAME": "prisma-schools-repos"}):
         result = transcribe_material_from_s3("school_x", "lenguaje", "5basico", "guia.docx")
 
-    assert result == "=== guia.docx ===\nContenido del Word transcrito"
-    upload_call = mock_client.files.upload.call_args
-    assert upload_call.kwargs["config"]["mime_type"] == \
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    assert "=== guia.docx ===" in result
+    assert "Texto extraído del Word." in result
+    mock_client.files.upload.assert_not_called()
 
 
 def test_transcribe_pdf_from_s3_alias_still_works():
