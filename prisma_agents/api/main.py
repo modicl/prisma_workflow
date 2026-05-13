@@ -52,33 +52,39 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="P.R.I.S.M.A. API",
     description="""
-API REST que orquesta el flujo multi-agente de generación de rúbricas adaptadas para
-estudiantes con Necesidades Educativas Especiales (NEE) bajo el marco normativo chileno
+Motor de agentes IA que ejecuta el flujo multi-agente de generación de rúbricas adaptadas
+para estudiantes con Necesidades Educativas Especiales (NEE) bajo el marco normativo chileno
 (Decreto 170, Decreto 83, Decreto 67).
 
-## Modos de operación
+**Este servicio no recibe archivos del cliente.** La carga de documentos y el registro
+de sesiones es responsabilidad del microservicio `prisma-ms-docs` (NestJS, puerto 3002).
 
-**Modo local (dev):** `POST /chat/start` guarda los archivos en disco y lanza el workflow
-directamente como `asyncio` BackgroundTask. No requiere AWS.
-
-**Modo AWS (prod):** `POST /chat/start` sube los archivos a S3 (`prisma-workflow`) y registra
-la sesión en DynamoDB. El PUT event de S3 dispara automáticamente la Lambda `prisma-trigger`,
-que llama a `POST /chat/internal/run/{session_id}` para arrancar el workflow en el backend.
+## Arquitectura del sistema
 
 ```
-Cliente → POST /chat/start
-              │
-              ├─ [dev]  BackgroundTask → workflow directo
-              │
-              └─ [prod] S3 PUT → Lambda prisma-trigger
-                                      ↓
-                          POST /chat/internal/run/{session_id}
-                                      ↓
-                          workflow multi-agente (5–15 min)
-
-En ambos modos, el cliente sigue el progreso via SSE:
-GET /chat/{session_id}/stream  ←  eventos: message | hitl_required | completed | error
+[Frontend]
+    │
+    ▼
+[prisma-ms-docs] ── sube archivos a S3 ──────────────────┐
+    │               crea sesión en DynamoDB               │
+    │                                                     │ S3 PUT event
+    │                                              [Lambda prisma-trigger]
+    │                                                     │
+    │                                                     ▼
+    └──────────────────────────────────► [ESTE SERVICIO — FastAPI]
+                                          POST /chat/internal/run/{session_id}
+                                               │
+                                          workflow multi-agente (5–15 min)
+                                               │ SSE
+                                          GET /chat/{session_id}/stream
 ```
+
+## Responsabilidades de este servicio
+
+- Ejecutar el workflow de agentes al ser invocado por la Lambda (`/internal/run`)
+- Exponer el estado de la sesión en tiempo real via SSE (`/stream`) y polling (`/state`)
+- Gestionar la revisión HITL del docente (`/hitl`)
+- Servir el DOCX generado (`/download`)
 
 ## Variables de entorno requeridas
 
@@ -111,6 +117,14 @@ al recibir un evento `hitl_required`. El flujo tiene un máximo de 3 iteraciones
                 "Uso exclusivo de la Lambda `prisma-trigger`. "
                 "Autenticado con el header `X-Internal-Token`. "
                 "No llamar directamente desde el cliente."
+            ),
+        },
+        {
+            "name": "Dev",
+            "description": (
+                "Endpoints de conveniencia para desarrollo local. "
+                "En producción estas funciones las realiza `prisma-ms-docs`. "
+                "No exponer ni llamar en entornos productivos."
             ),
         },
         {

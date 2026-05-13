@@ -46,17 +46,16 @@ def _safe_ext(filename: str | None, default: str) -> str:
 
 @router.post(
     "/start",
-    tags=["Chat"],
-    summary="Registrar sesión y subir documentos",
+    tags=["Dev"],
+    summary="[Solo dev] Registrar sesión y subir documentos",
     description=(
-        "Sube el PACI y el material base del estudiante y registra la sesión. "
-        "**No inicia el workflow directamente** — el arranque del agente es responsabilidad "
-        "de la Lambda `prisma-trigger` vía `POST /chat/internal/run/{session_id}`.\n\n"
-        "**Flujo AWS (producción):** los archivos se suben a S3 (`prisma-workflow`) y la sesión "
-        "se registra en DynamoDB. El PUT event en S3 dispara automáticamente la Lambda, "
-        "que llama a `/chat/internal/run/{session_id}` para despertar al agente.\n\n"
+        "> ⚠️ **Endpoint de desarrollo local únicamente.** En producción esta responsabilidad "
+        "recae en el microservicio `prisma-ms-docs` (NestJS), que sube los archivos a S3 y "
+        "crea la sesión en DynamoDB. Este endpoint no debe ser llamado en producción.\n\n"
+        "Sube el PACI y el material base, crea la sesión en DynamoDB y simula el rol de "
+        "`prisma-ms-docs` para pruebas locales sin levantar el stack completo.\n\n"
         "**Flujo local (dev):** los archivos se guardan en disco y el workflow se lanza "
-        "como BackgroundTask directamente, simulando el comportamiento de la Lambda."
+        "como BackgroundTask directamente, simulando el disparo de la Lambda."
     ),
     response_model=StartChatResponse,
     status_code=201,
