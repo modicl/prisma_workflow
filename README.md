@@ -1,92 +1,238 @@
-# Flujo Multi-Agente PACI (En desarrollo)
+# P.R.I.S.M.A. — Workflow Multi-Agente
 
-Sistema multi-agente para apoyar a docentes del sistema escolar chileno en la generación de **rúbricas de evaluación adaptadas** para estudiantes con Necesidades Educativas Especiales (NEE), a partir del PACI del alumno y el material educativo base.
+Sistema de inteligencia artificial que apoya a docentes del sistema escolar chileno en la generación de **rúbricas de evaluación adaptadas** para estudiantes con Necesidades Educativas Especiales (NEE), a partir del PACI del alumno y el material educativo base.
 
-Construido con **Google ADK** y el modelo **Gemini 2.5 Flash Lite**.
+Construido con **Google Agent Development Kit (ADK)** y el modelo **Gemini 2.5 Flash Lite**, orquestando cuatro agentes especializados bajo un marco normativo embebido (Decreto 170, Decreto 83, Decreto 67).
 
 ---
 
-## ¿Qué hace?
+## ¿Qué hace exactamente?
 
-Dado el PACI de un estudiante y un material educativo base, el sistema ejecuta automáticamente el siguiente flujo:
+El docente entrega dos documentos:
+
+1. El **PACI del estudiante** (Plan de Adecuación Curricular Individual), en formato PDF o DOCX.
+2. El **material educativo base** que usará en clases, también en PDF o DOCX.
+
+El sistema analiza ambos documentos, propone adaptaciones curriculares conforme al Decreto 83/2015 (DUA), espera la revisión y aprobación del docente (**checkpoint HITL**) y luego genera una rúbrica de evaluación adaptada al perfil real del alumno. El resultado final es un archivo `.docx` listo para usar.
+
+### Flujo completo
 
 ```
-[PACI del alumno] + [Material base] + [Prompt opcional] + [school_id]
-                        ↓
-        Agente 1 — AnalizadorPACI
-        Extrae NEE, perfil de aprendizaje, OA priorizados,
-        consideraciones de evaluación, ramo y curso del estudiante.
-                        ↓
-        Repositorio de Materiales (S3)
-        Detecta ramo y curso automáticamente desde el perfil.
-        Consulta el índice del colegio en S3 y usa Gemini para
-        seleccionar los 3 materiales más relevantes para el perfil.
-        Transcribe y entrega el contenido al GeneradorRúbrica.
-                        ↓
-        ┌─────── CHECKPOINT HITL (máx. 6 intentos) ──────────┐
-        │ Agente 2 — Adaptador                               │
-        │ Reescribe el material educativo base aplicando     │
-        │ principios DUA y adecuaciones del Decreto 83/2015. │
-        │                  ↓                                 │
-        │ El docente revisa el análisis y la adaptación      │
-        │ y decide si aprobar o rechazar.                    │
-        │  ✅ Aprueba       → continúa el flujo              │
-        │  ❌ Rechaza       → elige qué agente corregir      │
-        │     Agente 1      → re-analiza el PACI             │
-        │     Agente 2      → re-adapta el material          │
-        │  ⛔ Sin aprobación → proceso cancelado             │
-        └─────────────────────────────────────────────────────┘
-                        ↓
-        Agente 3 — GeneradorRúbrica  ←──────────────┐
-        Genera una rúbrica de evaluación adaptada    │
-        usando los materiales del colegio como       │
-        referencia para alinear criterios y niveles  │
-        con lo que el docente usa en el aula.        │
-                        ↓                            │
-        Agente Crítico                               │
-        Evalúa la rúbrica contra el Decreto 83/2015, │
-        Decreto 170/2010 y Decreto 67/2018.          │
-        Si no es aceptable → retroalimentación ──────┘
-        (máximo 3 intentos)
-                        ↓
-        RESULTADO: rubrica_adaptada_<nombre_material>.docx
+[PACI del alumno]  +  [Material base]  +  [Prompt opcional del docente]
+                              │
+                    Agente 1 — AnalizadorPACI
+                    Extrae NEE, perfil de aprendizaje, OA priorizados,
+                    ramo y curso del estudiante.
+                              │
+               ┌──── CHECKPOINT HITL (máx. 6 intentos) ────┐
+               │  Agente 2 — Adaptador                      │
+               │  Reescribe el material aplicando DUA       │
+               │  y adecuaciones del Decreto 83/2015.       │
+               │                                            │
+               │  El docente revisa y decide:               │
+               │    ✅ Aprueba   → continúa                 │
+               │    ❌ Rechaza   → elige qué agente corregir │
+               └────────────────────────────────────────────┘
+                              │
+               ┌──── Loop interno (máx. 3 intentos) ────────┐
+               │  Agente 3 — GeneradorRúbrica               │
+               │  Genera rúbrica alineada al perfil PACI    │
+               │  y a los materiales del colegio (S3).      │
+               │              │                             │
+               │  Agente Crítico                            │
+               │  Valida contra Decreto 83, 170 y 67.       │
+               │  Si no es aceptable → retroalimenta ───────┘
+                              │
+               RESULTADO: rubrica_adaptada_<nombre_material>.docx
 ```
 
 ---
 
-## Marco normativo incorporado
+## Requisitos previos
 
-Los agentes tienen conocimiento embebido de:
+| Requisito | Detalle |
+|---|---|
+| **Python** | 3.10 o superior |
+| **Google AI API Key** | Obtener en [aistudio.google.com](https://aistudio.google.com/app/apikey) — el plan gratuito es suficiente para pruebas |
+| **Supabase** | Proyecto con autenticación habilitada (para verificación JWT en el modo API) |
+| **AWS** *(opcional)* | Credenciales IAM con `s3:GetObject` sobre el bucket de materiales y acceso a DynamoDB si se usa la arquitectura event-driven |
+| **PostgreSQL** *(opcional)* | Solo para el dashboard de consumo de tokens ADK |
 
-| Decreto              | Contenido relevante                                                                                                                                   |
-| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Decreto 170/2010** | Clasificación y criterios diagnósticos de NEE permanentes (TEA, DI, visual, auditiva, disfasia, motora) y transitorias (DA, TEL, TDAH, CIL)           |
-| **Decreto 83/2015**  | Tipos de adecuaciones curriculares (acceso, no significativas, significativas), principios DUA, estructura del PACI, evaluación basada en OA del PACI |
-| **Decreto 67/2018**  | Normas de evaluación, calificación (escala 1.0–7.0) y promoción; diversificación obligatoria para alumnos con NEE                                     |
-
----
-
-## Privacidad, Seguridad y Monitoreo
-
-- **Protección de Datos (PII):** Los documentos PDF se eliminan de la API de Google Files inmediatamente tras su descarga, garantizando que el material sensible de los estudiantes no quede almacenado en sistemas externos.
-- **Prevención de Prompt Injection:** Todos los documentos y contenidos alimentados por el usuario quedan restringidos mediante delimitadores XML (`<documento_usuario>`) y contramedidas para mitigar vectores de escape.
-- **Aislamiento Multi-usuario:** Múltiples invocaciones de agentes se separan de manera segura bajo un identificador `user_id` dinámico para correcta trazabilidad.
-- **Dashboard de Consumo de Tokens:** Script analítico (`dashboard.py`) para revisar el histórico del consumo de la API, analizando visualmente promedios, uso por agente, percentiles y detecciones de atipicidades desde vistas SQL en PostgreSQL.
+> Para una prueba rápida en local **solo se necesita la Google AI API Key**. AWS y PostgreSQL son opcionales.
 
 ---
 
-## Repositorio de Materiales por Colegio
+## Instalación
 
-Cada colegio puede mantener su propio repositorio de materiales educativos en AWS S3. Cuando el flujo se ejecuta con un `school_id`, el sistema:
+```bash
+# 1. Clonar el repositorio
+git clone <url-del-repo>
+cd prisma_workflow
 
-1. **Detecta el ramo y curso** automáticamente desde el análisis del PACI (o desde el prompt del docente como fallback), normalizando aliases en español ("Matemáticas", "mate", "5° Básico", "quinto básico" → keys estandarizadas).
-2. **Consulta el índice** del colegio en S3 (`schools/{school_id}/{ramo}/{curso}/index.json`), que lista los materiales disponibles con título, descripción y prioridad.
-3. **Selecciona los 3 más relevantes** usando Gemini, comparando el índice contra el perfil del estudiante.
-4. **Transcribe el contenido** de cada material (PDF vía Gemini Files API con OCR; DOCX via parseo XML local) y lo entrega al GeneradorRúbrica.
+# 2. Crear y activar entorno virtual
+python -m venv venv
 
-**La ventaja clave:** la rúbrica generada no es genérica — se alinea con los materiales, ejercicios y ejemplos que el docente realmente usa en el aula. Si el colegio trabaja con guías de fracciones específicas, la rúbrica refleja exactamente ese enfoque.
+# Windows
+venv\Scripts\activate
+# macOS / Linux
+source venv/bin/activate
 
-**Estructura del índice S3:**
+# 3. Instalar dependencias
+pip install -r requirements.txt
+```
+
+---
+
+## Configuración de variables de entorno
+
+Dentro de la carpeta `prisma_agents/` hay un archivo `.env.example`. Cópialo como `.env` en la misma carpeta y completa los valores:
+
+```bash
+cp prisma_agents/.env.example prisma_agents/.env
+# Luego edita prisma_agents/.env con tus credenciales reales
+```
+
+Las variables mínimas para arrancar en local son:
+
+```env
+GOOGLE_GENAI_USE_VERTEXAI=0
+GOOGLE_API_KEY=tu_api_key_aqui
+
+# Para el modo API (uvicorn), también se necesita Supabase:
+SUPABASE_URL=https://<tu-proyecto>.supabase.co
+SUPABASE_JWT_SECRET=tu_jwt_secret
+```
+
+El resto de las variables (AWS, DynamoDB, Langfuse, PostgreSQL) son opcionales y el sistema opera sin ellas, con las siguientes diferencias:
+
+| Variable ausente | Comportamiento |
+|---|---|
+| `S3_BUCKET_NAME` | No se consultan materiales de referencia por colegio |
+| `S3_BUCKET` / `DYNAMO_TABLE` | El estado de sesión solo se mantiene en memoria |
+| `BD_LOGS` | No se registra el historial de tokens ADK |
+| `LANGFUSE_*` | Sin trazabilidad de llamadas LLM en Langfuse |
+
+---
+
+## Uso — Modo CLI (ejecución directa)
+
+El modo más simple: se ejecuta el flujo completo desde la terminal, con el checkpoint HITL interactivo en consola.
+
+```bash
+cd prisma_agents
+
+python run.py <paci_path> <material_path> [prompt_adicional] [user_id] [school_id]
+```
+
+| Argumento | Obligatorio | Descripción |
+|---|---|---|
+| `paci_path` | ✅ | Ruta al PACI del estudiante (`.pdf`, `.docx`, `.json`) |
+| `material_path` | ✅ | Ruta al material educativo base (`.pdf`, `.docx`) |
+| `prompt_adicional` | ❌ | Instrucción extra para orientar a los agentes |
+| `user_id` | ❌ | ID del docente (se genera un UUID si se omite) |
+| `school_id` | ❌ | ID del colegio para consultar materiales en S3 |
+
+### Ejemplos
+
+```bash
+# Prueba rápida con los documentos de ejemplo incluidos en el repo
+python run.py ../docs_test/paci_test.pdf ../docs_test/material_base_test.pdf
+
+# Con instrucción adicional al agente
+python run.py datos/paci.pdf datos/material.docx "Foco en comprensión lectora"
+
+# Con repositorio de materiales del colegio en S3
+python run.py datos/paci.pdf datos/material.docx "" "" "colegio_demo"
+```
+
+### Formatos de documento soportados
+
+| Tipo | Formatos | Método de extracción |
+|---|---|---|
+| PACI del estudiante | `.pdf`, `.docx`, `.json` | Gemini OCR / XML / JSON |
+| Material base | `.pdf`, `.docx` | Gemini OCR / XML |
+| Materiales de referencia S3 | `.pdf`, `.docx` | Gemini OCR / XML |
+
+> **Nota:** `.doc` (Word 97-2003) no está soportado. Guardar como `.docx` o `.pdf` antes de usar.
+
+---
+
+## Uso — Modo API (servidor FastAPI)
+
+El modo API expone los endpoints REST necesarios para que un frontend consuma el flujo de forma asíncrona con streaming SSE.
+
+```bash
+cd prisma_agents
+uvicorn api.main:app --port 8000 --reload
+```
+
+La documentación interactiva queda disponible en `http://localhost:8000/docs`.
+
+### Endpoints principales
+
+| Endpoint | Descripción |
+|---|---|
+| `POST /chat/start` | Inicia sesión subiendo PACI y material *(solo en desarrollo local; en producción lo maneja `prisma-ms-docs`)* |
+| `GET /chat/{id}/stream` | Stream SSE con actualizaciones de progreso en tiempo real |
+| `GET /chat/{id}/state` | Estado actual de la sesión (fase, mensajes, datos HITL) |
+| `POST /chat/{id}/hitl` | Envía la aprobación o el rechazo del docente |
+| `GET /chat/{id}/download` | Descarga el `.docx` generado |
+| `GET /health` | Healthcheck |
+
+En la arquitectura de producción, la carga de archivos la realiza el microservicio `prisma-ms-docs` (NestJS), que sube los documentos a S3 y dispara el workflow vía Lambda. Este backend solo recibe la llamada interna de la Lambda (`POST /chat/internal/run/{session_id}`).
+
+---
+
+## Frontend prototipo — solo para previsualización
+
+> ⚠️ **La carpeta `frontend/` contiene un prototipo de interfaz que NO es el producto final.**
+>
+> Su único propósito es demostrar a grandes rasgos cómo se ve el flujo agéntico desde la perspectiva del usuario: la carga de documentos, el seguimiento de progreso, el checkpoint HITL y la descarga del resultado. No está diseñada para producción ni representa la UI definitiva del sistema.
+>
+> El frontend real del proyecto es **`prisma-front`** (repositorio separado), construido con React 19 y conectado a los microservicios NestJS correspondientes.
+
+### Cómo correr el prototipo localmente
+
+Requiere Node.js 18+ y que el backend FastAPI esté corriendo en el puerto 8000.
+
+```bash
+# 1. Asegurarse de que el backend esté activo
+cd prisma_agents
+uvicorn api.main:app --port 8000 --reload
+
+# 2. En otra terminal, arrancar el frontend prototipo
+cd frontend
+npm install
+npm run dev
+# Abre http://localhost:5173
+```
+
+El frontend prototipo funciona con el backend directamente (sin Lambda ni DynamoDB), lo que lo hace ideal para probar el flujo completo en un entorno de desarrollo sin infraestructura AWS.
+
+---
+
+## Checkpoint HITL — Revisión del docente
+
+Después del Agente 2, el flujo se **pausa** y presenta un resumen del análisis y la adaptación para que el docente lo revise. Esto ocurre tanto en la terminal (modo CLI) como a través del endpoint `/hitl` (modo API).
+
+- **Aprueba** → el flujo continúa con la generación de la rúbrica.
+- **Rechaza** → el docente indica el motivo y elige qué agente corregir:
+  - Agente 1: re-analiza el PACI con el feedback inyectado.
+  - Agente 2: re-adapta el material con el feedback inyectado.
+- Se permiten hasta **6 intentos** de revisión. Si ninguno es aprobado, el proceso se cancela con estado `hitl_rejected`.
+
+---
+
+## Repositorio de materiales por colegio (S3)
+
+Si se configura `S3_BUCKET_NAME` y se provee un `school_id`, el sistema consulta los materiales educativos del colegio almacenados en S3 para alinear la rúbrica con lo que el docente realmente usa en el aula.
+
+**Estructura del índice en S3:**
+
+```
+schools/{school_id}/{ramo}/{curso}/index.json
+```
+
 ```json
 {
   "school_id": "colegio_demo",
@@ -97,379 +243,97 @@ Cada colegio puede mantener su propio repositorio de materiales educativos en AW
       "filename": "guia_fracciones.pdf",
       "title": "Cuadernillo fracciones",
       "description": "Ejercicios de fracciones con contextos cotidianos",
-      "priority": 1,
-      "pages": 30,
-      "tags": ["fracciones", "OA3"]
+      "priority": 1
     }
   ]
 }
 ```
 
-> Si no se provee `school_id` o el colegio no tiene materiales para ese ramo/curso, el flujo continúa sin materiales de referencia (comportamiento anterior).
-
----
-
-## Requisitos
-
-- Python 3.10+
-- Una API Key de Google AI Studio ([obtener aquí](https://aistudio.google.com/app/apikey))
-- *(Opcional)* Credenciales AWS con permiso `s3:GetObject` sobre el bucket del repositorio de materiales
-
----
-
-## Instalación
-
-```bash
-# 1. Clonar o descargar el repositorio
-cd prisma_agents
-
-# 2. Crear y activar entorno virtual
-python -m venv venv
-# Windows:
-venv\Scripts\activate
-# macOS/Linux:
-source venv/bin/activate
-
-# 3. Instalar dependencias
-pip install -r requirements.txt
-
-# 4. Configurar variables de entorno
-# Editar el archivo .env:
-GOOGLE_GENAI_USE_VERTEXAI=0
-GOOGLE_API_KEY=tu_api_key_aqui
-
-# Opcional — solo si usas el repositorio de materiales S3:
-AWS_ACCESS_KEY_ID=tu_access_key
-AWS_SECRET_ACCESS_KEY=tu_secret_key
-AWS_REGION=us-east-1
-S3_BUCKET_NAME=prisma-schools-repos
-```
-
----
-
-## Uso
-
-```bash
-python run.py <paci_path> <material_path> [prompt_adicional] [user_id] [school_id]
-```
-
-| Argumento          | Obligatorio | Descripción                                            |
-| ------------------ | ----------- | ------------------------------------------------------ |
-| `paci_path`        | ✅           | Ruta al PACI del estudiante (`.pdf`, `.docx`, `.json`) |
-| `material_path`    | ✅           | Ruta al material educativo base (`.pdf`, `.docx`)      |
-| `prompt_adicional` | ❌           | Instrucción extra para los agentes                     |
-| `user_id`          | ❌           | ID del docente (se genera UUID automáticamente)        |
-| `school_id`        | ❌           | ID del colegio para consultar repositorio S3           |
-
-### Probar con los documentos de ejemplo
-
-```bash
-cd prisma_agents
-python run.py ../docs_test/paci_test.pdf ../docs_test/material_base_test.pdf
-```
-
-### Otros ejemplos
-
-```bash
-# Con instrucción adicional
-python run.py ../docs_test/paci_test.pdf ../docs_test/material_base_test.pdf "Foco en comprensión lectora"
-
-# PACI en JSON + material en DOCX
-python run.py datos/paci_alumno.json datos/guia_matematicas.docx
-
-# Con repositorio de materiales del colegio
-python run.py datos/paci.pdf datos/material.docx "" "" "colegio_demo"
-```
-
-### Formatos soportados
-
-| Documento                    | Formatos                 | Método de extracción                            |
-| ---------------------------- | ------------------------ | ----------------------------------------------- |
-| PACI del estudiante          | `.pdf`, `.docx`, `.json` | Gemini OCR / XML directo / JSON                 |
-| Material base                | `.pdf`, `.docx`          | Gemini OCR / XML directo                        |
-| Materiales de referencia S3  | `.pdf`, `.docx`          | Gemini OCR / XML directo                        |
-
-- **PDF**: se sube a la Gemini Files API con instrucción OCR explícita. Funciona tanto con PDFs de texto seleccionable como con documentos escaneados.
-- **DOCX**: se extrae texto iterando todos los elementos `<w:t>` del XML interno del archivo. Captura párrafos, **cuadros de texto**, tablas, encabezados y pies de página — incluso en documentos con formularios o layouts complejos que python-docx no lee correctamente.
-- **.doc (Word 97-2003)**: no soportado. Guardar como `.docx` o `.pdf`.
-
-> El formato `.json` es para PACI exportados desde formularios digitales (Google Forms, plataformas MINEDUC, etc.)
-
-### Dashboard de Consumo de Tokens
-
-Para consultar las métricas de tokens usados por cada agente y detectar consumo excesivo (se prevee usar una API más adelante):
-
-```bash
-python dashboard.py                 # Datos guardados del mes actual
-python dashboard.py --all           # Historial completo guardado en BD
-python dashboard.py --create-views  # Inicializar/resetear vistas SQL de tracking
-python dashboard.py --html          # Exportar informe como un dashboard web local (HTML)
-```
-
----
-
-## HITL — Checkpoint del docente
-
-Después de que el Agente 2 genera la planificación adaptada, el flujo se **pausa** y presenta al docente un resumen del análisis y la adaptación para su revisión.
-
-El docente puede escribir en lenguaje natural — el sistema usa un LLM para clasificar si la respuesta es positiva o negativa, sin lista de palabras clave.
-
-```
-══════════════════════════════════════════════════════════════
-  REVISIÓN DEL DOCENTE [1/6]
-══════════════════════════════════════════════════════════════
-
-── RESUMEN ANÁLISIS PACI (Agente 1) ────────────────────
-...
-
-── RESUMEN PLANIFICACIÓN ADAPTADA (Agente 2) ───────────
-...
-
-⚠  Quedan 5 intento(s) de revisión.
-──────────────────────────────────────────────────────────────
-¿Aprueba el análisis y la planificación?
-```
-
-Si **rechaza**, el sistema pide la razón (ese mismo mensaje es el feedback) y pregunta qué agente corregir:
-
-```
-¿El problema está en el análisis del PACI (1) o en la adaptación del material (2)?
-```
-
-- Elige **1** → el feedback se inyecta en el Agente 1, que re-analiza el PACI, y luego el Agente 2 re-adapta el material.
-- Elige **2** → el feedback se inyecta solo en el Agente 2, que re-adapta el material.
-- Si se agotan los **6 intentos** sin aprobación → el proceso se cancela (`status: hitl_rejected`).
-
----
-
-## Output
-
-```
-══════════════════════════════════════════════════════════
-  FLUJO COMPLETADO
-══════════════════════════════════════════════════════════
-  Estado : success
-  Archivo: /ruta/rubrica_adaptada_<nombre_material>.docx
-══════════════════════════════════════════════════════════
-```
-
-El contenido completo queda en el archivo `.docx` generado.
-
----
-
-## Prototipo de interfaz (UI)
-
-La rama `feature/ui-backend` incluye un prototipo funcional de la interfaz web. Su propósito es **visualizar el flujo completo** — cómo el docente interactúa con el agente — y servir como referencia de UX para quien deba implementar la interfaz en producción.
-
-### Arquitectura
-
-El sistema implementa una **arquitectura event-driven** basada en tres servicios AWS más dos backends desacoplados:
-
-```
-                  ┌─────────────────────────────────────┐
-                  │   MICROSERVICIO DE UPLOAD            │
-                  │   (desacoplado del agente)           │
-[Docente — Browser]─── POST /chat/start ──────────────▶ │
-                  │  ├─ Escribe sesión en DynamoDB       │
-                  │  ├─ Sube archivos a S3               │
-                  │  └─ Retorna { session_id }           │
-                  └─────────────────────────────────────┘
-                               │ < 1 segundo
-                               ▼
-                  S3 PUT Event (automático)
-                               │
-                               ▼
-                  [AWS Lambda — trigger liviano]
-                    Lee session_id del evento S3
-                    Llama POST /internal/run/{session_id}
-                               │
-                               ▼
-                  ┌─────────────────────────────────────┐
-                  │   BACKEND DEL AGENTE                 │
-                  │   Descarga archivos desde S3         │
-                  │   Corre PaciWorkflowAgent completo   │
-                  │   En checkpoint HITL:                │
-                  │     → escribe hitl_data en DynamoDB  │
-                  │     → phase = "awaiting_hitl"        │
-                  │     → espera respuesta del docente   │
-                  │   Al completar:                      │
-                  │     → sube DOCX a S3 (results/)      │
-                  │     → phase = "completed" en Dynamo  │
-                  └─────────────────────────────────────┘
-
-[Browser — polling GET /chat/{id}/state cada 2s]
-  ← Lee estado desde DynamoDB
-```
-
-**¿Por qué dos backends separados?**
-
-El microservicio de upload y el backend del agente tienen responsabilidades, ciclos de vida y requisitos de cómputo completamente distintos:
-
-| | Microservicio de upload | Backend del agente |
-|---|---|---|
-| **Responsabilidad** | Recibir archivos, escribir en DynamoDB, subir a S3 | Correr el flujo multi-agente, manejar HITL |
-| **Duración de request** | < 1 segundo | 5-15 minutos por sesión |
-| **Escala** | Escala horizontal fácilmente (stateless) | Stateful — mantiene `asyncio.Queue` por sesión |
-| **Cómputo** | Mínimo (I/O puro) | Intensivo (LLM calls, procesamiento de documentos) |
-| **Dependencias** | Solo boto3 + FastAPI | Google ADK, Gemini, todas las dependencias del agente |
-
-Desacoplarlos evita que una subida de archivos lenta o un spike de uploads afecte al agente en ejecución, y permite escalar o reemplazar cada servicio de forma independiente.
-
-> **En el prototipo actual** ambos corren en el mismo proceso FastAPI para simplificar el desarrollo. El contrato entre ellos es S3 + DynamoDB + el endpoint `/internal/run`, por lo que separarlos en producción no requiere cambiar ningún otro componente.
-
-**Servicios AWS utilizados:**
-
-| Servicio | Rol |
-|---|---|
-| **S3** (`prisma-workflow`) | Almacena archivos de entrada (`jobs/`) y la rúbrica generada (`results/`) |
-| **DynamoDB** (`prisma-sessions`) | Store de estado de sesiones — permite que el frontend haga polling al backend sin depender de memoria en proceso |
-| **Lambda** (`prisma-trigger`) | Trigger liviano (stdlib Python, sin dependencias externas) que dispara el flujo del agente en respuesta al PUT de S3 |
-
-**Ventaja clave de esta arquitectura:** el docente sube los archivos y recibe `session_id` en menos de 1 segundo. El procesamiento del agente (que puede durar 5-15 minutos) ocurre completamente en background, sin bloquear al usuario ni mantener una conexión HTTP abierta.
-
-El frontend es una SPA React que se comunica vía REST.
-
-### Cómo correrlo
-
-```bash
-# Backend (desde prisma_agents/)
-uvicorn api.main:app --port 8000 --reload
-
-# Frontend (desde frontend/)
-npm install
-npm run dev          # abre en http://localhost:5173
-```
-
-### Flujo de pantallas
-
-**Pantalla 1 — Carga de documentos**
-
-El docente sube el PACI del estudiante y el material base (PDF o DOCX), con un campo de prompt libre opcional. Al presionar "Iniciar" se llama `POST /chat/start` y la interfaz navega al chat.
-
-**Pantalla 2 — Chat con el agente**
-
-Muestra mensajes de progreso mientras el agente trabaja. Un spinner indica que el procesamiento está activo (polling cada 2 segundos al backend). Los mensajes aparecen en burbujas a medida que cada etapa del flujo completa.
-
-**Checkpoint HITL — Revisión del docente**
-
-Cuando el Agente 2 termina la adaptación, el flujo se pausa y se muestra una tarjeta de revisión con:
-- El análisis del PACI generado por el Agente 1 (en acordeón colapsable)
-- La planificación adaptada generada por el Agente 2 (en acordeón colapsable)
-- Botones **Aprobar** / **Rechazar**
-
-Si rechaza: el docente escribe el motivo y elige qué agente corregir (Agente 1 o Agente 2). El flujo se reanuda automáticamente con el feedback inyectado.
-
-**Pantalla final**
-
-Al completarse el flujo, aparece un botón para descargar la rúbrica adaptada en formato `.docx`.
-
-### Endpoints de la API
-
-Ver documentación completa en [`prisma_agents/api/README.md`](prisma_agents/api/README.md).
-
-| Endpoint | Descripción |
-|---|---|
-| `POST /chat/start` | Inicia sesión, lanza el agente en background |
-| `GET /chat/{id}/state` | Estado actual (fase, mensajes, datos HITL) |
-| `POST /chat/{id}/hitl` | Envía aprobación o rechazo del docente |
-| `GET /chat/{id}/download` | Descarga el `.docx` generado |
-| `GET /health` | Healthcheck |
-
-### Variables de entorno requeridas (backend)
-
-```bash
-# Google AI
-GOOGLE_API_KEY=...
-
-# PostgreSQL (logs ADK)
-BD_LOGS=postgresql://...
-
-# AWS — credenciales IAM
-AWS_ACCESS_KEY_ID=...
-AWS_SECRET_ACCESS_KEY=...
-AWS_REGION=us-east-2
-
-# S3 bucket de materiales del colegio
-S3_BUCKET_NAME=prisma-schools-repos
-
-# Arquitectura event-driven (dejar vacío para dev local sin AWS)
-S3_BUCKET=prisma-workflow
-DYNAMO_TABLE=prisma-sessions
-INTERNAL_TOKEN=<secreto compartido con Lambda>
-```
-
-### Variables de entorno Lambda (`prisma-trigger`)
-
-```bash
-BACKEND_INTERNAL_URL=https://tu-backend.com
-INTERNAL_TOKEN=<mismo secreto que el backend>
-```
-
-### Consideraciones para producción
-
-El prototipo deliberadamente omite aspectos que deberán resolverse en una implementación real:
-
-- **Autenticación:** no hay login ni control de acceso. En producción se requiere al menos autenticación por docente.
-- **Limpieza de sesiones en memoria:** las sesiones completadas nunca se eliminan del dict `SESSIONS`. En producción agregar TTL o limpieza periódica. DynamoDB tiene TTL automático configurado a 7 días.
-- **Múltiples colegios:** `school_id` está fijo como `"colegio_demo"`. En producción debe ser configurable por docente o institución.
-- **DOCX en disco:** el archivo generado queda en el disco del backend indefinidamente. En producción servir directamente desde S3 con lifecycle policy.
-- **Lambda y VPC:** si el backend corre en subred privada, la Lambda debe estar en la misma VPC para poder llamarlo por URL interna.
-- **Infraestructura:** frontend y backend separados en contenedores distintos, con un proxy inverso (nginx) sirviendo el frontend y enrutando `/chat/*` al backend.
+Si el colegio no tiene materiales configurados para el ramo o curso detectado, el flujo continúa normalmente sin ellos.
 
 ---
 
 ## Estructura del proyecto
 
 ```
-prisma_agents/
-├── agent.py                  # Orquestador principal (PaciWorkflowAgent)
-├── run.py                    # Script de ejecución CLI
-├── requirements.txt
-├── .env                      # API Key + credenciales AWS (no subir a repositorio)
-├── dashboard.py              # Script interactivo de reportes de consumo de tokens API
-├── api/
-│   ├── main.py               # FastAPI app principal (carga .env, monta routers)
-│   ├── chat_router.py        # Endpoints /chat/* + /internal/run
-│   ├── session_store.py      # SessionData en memoria + sync a DynamoDB
-│   ├── workflow_runner.py    # Puente entre FastAPI y el agente (descarga S3, callback HITL)
-│   ├── dynamo_store.py       # Wrapper DynamoDB (create/get/update session)
-│   └── README.md             # Documentación de la API
-
-lambda/
-└── trigger_handler.py        # Lambda trigger: recibe evento S3 → llama /internal/run
-├── agents/
-│   ├── analizador_paci.py    # Agente 1: extrae perfil del PACI (incluye ramo/curso)
-│   ├── adaptador.py          # Agente 2: adapta el material educativo
-│   ├── generador_rubrica.py  # Agente 3: genera la rúbrica (usa materiales S3)
-│   └── critico.py            # Agente Crítico: evalúa la rúbrica
-├── tools/
-│   └── book_repository.py   # Acceso S3: lee índice, selecciona y transcribe materiales
-└── utils/
-    ├── document_loader.py    # Carga PDF (Gemini OCR), DOCX (XML) y JSON a texto
-    ├── curriculum_catalog.py # Normaliza ramo/curso desde texto libre en español
-    └── token_tracker.py      # Lógica de rastreo de tokens y uso por agente en el EventLoop
-
-frontend/
-├── src/
-│   ├── App.jsx               # Router entre UploadForm y ChatWindow
-│   ├── api.js                # Funciones fetch al backend
-│   └── components/
-│       ├── UploadForm.jsx    # Pantalla 1: carga de documentos
-│       ├── ChatWindow.jsx    # Pantalla 2: chat con polling
-│       ├── HitlCard.jsx      # Tarjeta de revisión HITL
-│       ├── MessageBubble.jsx # Burbuja de mensaje
-│       └── Spinner.jsx       # Indicador de carga
-├── vite.config.js            # Proxy /chat → puerto 8000
-└── package.json
+prisma_workflow/
+│
+├── requirements.txt              # Dependencias Python
+│
+├── prisma_agents/
+│   ├── .env.example              # Plantilla de variables de entorno (copiar como .env)
+│   ├── .env                      # Variables locales (NO subir al repositorio)
+│   │
+│   ├── agent.py                  # Orquestador principal (PaciWorkflowAgent)
+│   ├── run.py                    # Punto de entrada CLI
+│   ├── dashboard.py              # Dashboard de consumo de tokens ADK
+│   │
+│   ├── agents/
+│   │   ├── analizador_paci.py    # Agente 1: extrae perfil NEE desde el PACI
+│   │   ├── adaptador.py          # Agente 2: adapta el material (DUA + Decreto 83)
+│   │   ├── generador_rubrica.py  # Agente 3: genera la rúbrica de evaluación
+│   │   └── critico.py            # Agente Crítico: valida la rúbrica contra decretos
+│   │
+│   ├── api/
+│   │   ├── main.py               # FastAPI app (CORS, lifespan, montaje de routers)
+│   │   ├── chat_router.py        # Endpoints /chat/* y /internal/run
+│   │   ├── auth.py               # Verificación JWT Supabase (ES256 + JWKS)
+│   │   ├── session_store.py      # Estado en memoria + sync a DynamoDB
+│   │   ├── workflow_runner.py    # Puente FastAPI ↔ agente (descarga S3, callback HITL)
+│   │   ├── dynamo_store.py       # Wrapper DynamoDB (create / get / update sesión)
+│   │   ├── mock_runner.py        # Runner simulado para pruebas sin LLM
+│   │   └── schemas.py            # Modelos Pydantic de request/response
+│   │
+│   ├── tools/
+│   │   └── book_repository.py    # Acceso S3: lee índice, selecciona y transcribe materiales
+│   │
+│   ├── utils/
+│   │   ├── document_loader.py    # Carga PDF (Gemini OCR), DOCX (XML) y JSON a texto
+│   │   ├── document_exporter.py  # Genera el .docx final con formato limpio
+│   │   ├── curriculum_catalog.py # Normaliza ramo/curso desde texto libre en español
+│   │   ├── input_validator.py    # Valida el prompt del docente con LLM
+│   │   └── token_tracker.py      # Rastreo de tokens por agente en el EventLoop
+│   │
+│   ├── eval/                     # Scripts de evaluación y compliance checks
+│   └── tests/                    # Pruebas unitarias e integración
+│
+├── lambda/
+│   └── trigger_handler.py        # Lambda trigger: evento S3 → POST /internal/run
+│
+├── frontend/                     # ⚠️ PROTOTIPO — solo para previsualizar el flujo
+│   ├── src/
+│   │   ├── App.jsx
+│   │   ├── api.js
+│   │   └── components/
+│   │       ├── UploadForm.jsx    # Pantalla de carga de documentos
+│   │       ├── ChatWindow.jsx    # Seguimiento de progreso con polling
+│   │       ├── HitlCard.jsx      # Tarjeta de revisión HITL
+│   │       └── MessageBubble.jsx
+│   ├── vite.config.js            # Proxy /chat → puerto 8000
+│   └── package.json
+│
+└── docs_test/                    # Documentos de ejemplo para pruebas rápidas
+    ├── paci_test.pdf
+    └── material_base_test.pdf
 ```
 
 ---
 
-## Notas
+## Marco normativo incorporado
 
-- El checkpoint HITL permite hasta **6 intentos** de revisión. Si el docente no aprueba tras 6 intentos, el proceso se cancela sin generar documento.
-- El Agente Crítico puede rechazar la rúbrica hasta **3 veces**. Si tras 3 intentos no es aprobada, se entrega la última versión generada.
-- Los PDF se procesan mediante la **API de Gemini Files**, lo que requiere conexión a internet y consume cuota de la API Key.
-- El estado de la sesión y el histórico de los tokens de cada agente se manejan con identificadores únicos (`user_id`), permitiendo persistir las ejecuciones multi-docente de forma aislada en PostgreSQL.
-- El repositorio S3 es de **solo lectura** para el agente. Nunca escribe ni modifica materiales.
-- Si el colegio no tiene materiales para el ramo/curso detectado, el flujo **continúa normalmente** sin interrupciones — el repositorio S3 es opcional y aditivo.
+Los agentes tienen conocimiento embebido de los siguientes decretos del Ministerio de Educación de Chile:
+
+| Decreto | Contenido relevante |
+|---|---|
+| **Decreto 170/2010** | Clasificación y criterios diagnósticos de NEE permanentes (TEA, DI, visual, auditiva, disfasia, motora) y transitorias (DA, TEL, TDAH, CIL) |
+| **Decreto 83/2015** | Tipos de adecuaciones curriculares (acceso, no significativas, significativas), principios DUA, estructura del PACI |
+| **Decreto 67/2018** | Normas de evaluación, calificación (escala 1.0–7.0) y promoción; diversificación obligatoria para NEE |
+
+---
+
+## Notas importantes
+
+- Los archivos PDF se procesan mediante la **API de Gemini Files**, lo que requiere conexión a internet y consume cuota de la API Key. Los archivos se eliminan inmediatamente después de su lectura (protección de datos PII).
+- El checkpoint HITL permite hasta **6 intentos** de revisión. Si el docente no aprueba en ese límite, el proceso se cancela.
+- El Agente Crítico puede rechazar la rúbrica hasta **3 veces**; si no la aprueba tras los tres intentos, se entrega la última versión generada.
+- El repositorio S3 de materiales es de **solo lectura** para el agente: nunca escribe ni modifica materiales.
