@@ -49,12 +49,82 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="PRISMA Chat API", lifespan=lifespan)
+app = FastAPI(
+    title="P.R.I.S.M.A. API",
+    description="""
+API REST que orquesta el flujo multi-agente de generación de rúbricas adaptadas para
+estudiantes con Necesidades Educativas Especiales (NEE) bajo el marco normativo chileno
+(Decreto 170, Decreto 83, Decreto 67).
+
+## Modos de operación
+
+**Modo local (dev):** `POST /chat/start` guarda los archivos en disco y lanza el workflow
+directamente como `asyncio` BackgroundTask. No requiere AWS.
+
+**Modo AWS (prod):** `POST /chat/start` sube los archivos a S3 (`prisma-workflow`) y registra
+la sesión en DynamoDB. El PUT event de S3 dispara automáticamente la Lambda `prisma-trigger`,
+que llama a `POST /chat/internal/run/{session_id}` para arrancar el workflow en el backend.
+
+```
+Cliente → POST /chat/start
+              │
+              ├─ [dev]  BackgroundTask → workflow directo
+              │
+              └─ [prod] S3 PUT → Lambda prisma-trigger
+                                      ↓
+                          POST /chat/internal/run/{session_id}
+                                      ↓
+                          workflow multi-agente (5–15 min)
+
+En ambos modos, el cliente sigue el progreso via SSE:
+GET /chat/{session_id}/stream  ←  eventos: message | hitl_required | completed | error
+```
+
+## Variables de entorno requeridas
+
+| Variable | Descripción |
+|---|---|
+| `GOOGLE_API_KEY` | API Key de Google AI Studio (requerida siempre) |
+| `S3_BUCKET` | Bucket de jobs y resultados. Vacío → modo local |
+| `DYNAMO_TABLE` | Tabla DynamoDB de sesiones. Vacío → solo memoria |
+| `INTERNAL_TOKEN` | Secreto compartido backend ↔ Lambda `prisma-trigger` |
+
+## Flujo HITL
+
+El workflow puede pausarse y requerir revisión docente (`phase: awaiting_hitl`).
+El cliente escucha el SSE stream y responde via `POST /chat/{session_id}/hitl`
+al recibir un evento `hitl_required`. El flujo tiene un máximo de 3 iteraciones HITL.
+    """,
+    version="1.0.0",
+    openapi_tags=[
+        {
+            "name": "Chat",
+            "description": "Ciclo de vida de una sesión: iniciar, seguir progreso, cancelar y descargar resultado.",
+        },
+        {
+            "name": "HITL",
+            "description": "Human-in-the-loop: revisión docente del plan de adaptación curricular generado por el Agente Adaptador.",
+        },
+        {
+            "name": "Internal",
+            "description": (
+                "Uso exclusivo de la Lambda `prisma-trigger`. "
+                "Autenticado con el header `X-Internal-Token`. "
+                "No llamar directamente desde el cliente."
+            ),
+        },
+        {
+            "name": "System",
+            "description": "Health check y estado del servicio.",
+        },
+    ],
+    lifespan=lifespan,
+)
 app.add_middleware(CORSMiddleware)
 
 app.include_router(chat_router)
 
 
-@app.get("/health")
+@app.get("/health", tags=["System"], summary="Health check")
 async def health():
     return {"status": "ok"}
