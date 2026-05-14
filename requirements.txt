@@ -9,7 +9,7 @@ python-multipart==0.0.22
 httpx==0.28.1
 
 # ── Autenticación JWT ─────────────────────────────────────────────
-PyJWT==2.9.0
+PyJWT>=2.10.1
 cryptography>=41.0.0        # requerido por PyJWT para verificar ES256 (Supabase JWKS)
 
 # ── AWS ───────────────────────────────────────────────────────────
@@ -27,7 +27,4 @@ python-dotenv==1.2.2
 # ── Tests ─────────────────────────────────────────────────────────
 pytest>=8.0.0
 pytest-asyncio==0.24.0
-pytest-asyncio==0.24.0
 pytest-cov>=5.0.0
-PyJWT==2.9.0
-cryptography>=41.0.0
