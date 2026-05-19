@@ -10,19 +10,20 @@ Ejemplos:
 """
 
 import asyncio
-import json
 import sys
 import os
 import uuid
-from datetime import datetime
-from pathlib import Path
 from dotenv import load_dotenv
 
 # Carga .env desde la carpeta del script
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
+from utils.tracing import setup_tracing
+setup_tracing()
+
 from google.adk.runners import Runner
 from google.adk.sessions.database_session_service import DatabaseSessionService
+from google.adk.sessions.in_memory_session_service import InMemorySessionService
 from google.adk.plugins.logging_plugin import LoggingPlugin
 from google.genai.types import Content, Part
 
@@ -31,26 +32,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from agent import root_agent
 from utils.document_loader import load_document
 from utils.document_exporter import export_results_to_docx
-from utils.token_tracker import SessionTokenUsage
 from utils.input_validator import validate_prompt_docente
-
-TOKEN_REPORTS_DIR = Path(__file__).parent / "token_reports"
-
-
-def _save_token_report(session_id: str, tracker: SessionTokenUsage, status: str) -> None:
-    """Persiste el reporte de tokens de la sesión en token_reports/."""
-    TOKEN_REPORTS_DIR.mkdir(exist_ok=True)
-    report = {
-        "session_id": session_id,
-        "timestamp": datetime.now().isoformat(),
-        "status": status,
-        "tokens": tracker.to_dict(),
-    }
-    out_path = TOKEN_REPORTS_DIR / f"tokens_{session_id}.json"
-    with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(report, f, ensure_ascii=False, indent=2)
-    if tracker.has_data:
-        print(f"  ✓ Token report: {report['tokens']['total']:,} tokens totales → {out_path.name}")
 
 APP_NAME = "paci_workflow"
 
@@ -87,13 +69,13 @@ async def run_workflow(paci_path: str, material_path: str, prompt: str = "", use
     material_text = load_document(material_path, label="Material Base")
     print("  ✓ Documentos cargados.\n")
 
-    # Configurar sesión con estado inicial en PostgreSQL
     db_url = os.environ.get("BD_LOGS")
-    if not db_url:
-        raise ValueError("Error: La variable de entorno BD_LOGS no está configurada en el .env")
-        
-    print("[Conectando a base de datos...]")
-    session_service = DatabaseSessionService(db_url=db_url)
+    if db_url:
+        print("[Conectando a base de datos...]")
+        session_service = DatabaseSessionService(db_url=db_url)
+    else:
+        print("  ⚠ BD_LOGS no configurado — usando sesión en memoria (sin persistencia).")
+        session_service = InMemorySessionService()
     
     session = await session_service.create_session(
         app_name=APP_NAME,
@@ -121,16 +103,22 @@ async def run_workflow(paci_path: str, material_path: str, prompt: str = "", use
     # Mensaje inicial para activar el flujo
     mensaje_inicial = prompt if prompt else "Inicia el flujo PACI con los documentos proporcionados."
 
-    tracker = SessionTokenUsage()
+    from langfuse import propagate_attributes
+    trace_session_id = api_session_id if api_session_id else effective_user_id
+    metadata = {"school_id": school_id} if school_id else {}
 
-    async for event in runner.run_async(
+    with propagate_attributes(
         user_id=effective_user_id,
-        session_id=session.id,
-        new_message=Content(parts=[Part(text=mensaje_inicial)]),
+        session_id=trace_session_id,
+        trace_name="paci-workflow",
+        metadata=metadata,
     ):
-        # Capturar tokens por agente
-        author = getattr(event, "author", None) or "unknown"
-        tracker.add_event(author, event)
+        async for event in runner.run_async(
+            user_id=effective_user_id,
+            session_id=session.id,
+            new_message=Content(parts=[Part(text=mensaje_inicial)]),
+        ):
+            pass
 
     # Recuperar resultados del estado de sesión
     final_session = await session_service.get_session(
@@ -145,9 +133,6 @@ async def run_workflow(paci_path: str, material_path: str, prompt: str = "", use
         "rubrica_final": state.get("rubrica", ""),
         "docx_path": None,
     }
-
-    # Persistir reporte de tokens
-    _save_token_report(session.id, tracker, results["status"])
 
     # Exportar a DOCX solo si hay rúbrica generada
     # (hitl_rejected y timeout terminan sin rúbrica → no se genera documento)
@@ -174,6 +159,13 @@ async def run_workflow(paci_path: str, material_path: str, prompt: str = "", use
     else:
         print("  Archivo: no generado (ver error arriba)")
     print(f"{'='*60}\n")
+
+    # Flush Langfuse traces before returning (critical for CLI mode — process exits after this)
+    try:
+        from langfuse import get_client
+        get_client().flush()
+    except Exception:
+        pass
 
     return results
 

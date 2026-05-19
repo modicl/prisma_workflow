@@ -30,5 +30,8 @@ pytest-asyncio==0.24.0
 pytest-cov>=5.0.0
 
 # ── Libreria que necesitan pc's Mac ─────────────────────────────────────────────────────────
-
 greenlet==3.5.0
+
+# ── Observabilidad ────────────────────────────────────────────────
+langfuse==4.5.1
+openinference-instrumentation-google-adk==0.1.10
