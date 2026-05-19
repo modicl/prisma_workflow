@@ -9,10 +9,17 @@ from typing import Optional
 import boto3
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Header, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel
 
 from api import dynamo_store
 from api.auth import get_current_user
+from api.schemas import (
+    DownloadResponse,
+    HitlResponseBody,
+    InternalRunResponse,
+    OkResponse,
+    SessionStateResponse,
+    StartChatResponse,
+)
 from api.session_store import SESSIONS, SessionData, sync_to_dynamo
 from api.workflow_runner import run_workflow_for_api
 
@@ -35,25 +42,33 @@ def _safe_ext(filename: str | None, default: str) -> str:
     return suffix if suffix in _ALLOWED_EXTENSIONS else default
 
 
-class HitlResponseBody(BaseModel):
-    approved: bool
-    reason: Optional[str] = None
-    agent_to_retry: Optional[int] = None
-
-
-class StartChatResponse(BaseModel):
-    session_id: str
-
-
 # ── Public endpoints ──────────────────────────────────────────────────────────
 
-@router.post("/start", response_model=StartChatResponse, status_code=201)
+@router.post(
+    "/start",
+    tags=["Dev"],
+    summary="[Solo dev] Registrar sesión y subir documentos",
+    description=(
+        "> ⚠️ **Endpoint de desarrollo local únicamente.** En producción esta responsabilidad "
+        "recae en el microservicio `prisma-ms-docs` (NestJS), que sube los archivos a S3 y "
+        "crea la sesión en DynamoDB. Este endpoint no debe ser llamado en producción.\n\n"
+        "Sube el PACI y el material base, crea la sesión en DynamoDB y simula el rol de "
+        "`prisma-ms-docs` para pruebas locales sin levantar el stack completo.\n\n"
+        "**Flujo local (dev):** los archivos se guardan en disco y el workflow se lanza "
+        "como BackgroundTask directamente, simulando el disparo de la Lambda."
+    ),
+    response_model=StartChatResponse,
+    status_code=201,
+    responses={
+        400: {"description": "Extensión de archivo no soportada (.doc no está permitido directamente)"},
+        500: {"description": "Error al guardar archivos en disco o subir a S3"},
+    },
+)
 async def start_chat(
-    background_tasks: BackgroundTasks,
-    paci_file: UploadFile = File(...),
-    material_file: UploadFile = File(...),
-    prompt: str = Form(""),
-    school_id: str = Form("colegio_demo"),
+    paci_file: UploadFile = File(..., description="Documento PACI del estudiante (.pdf o .docx)"),
+    material_file: UploadFile = File(..., description="Material educativo base (.pdf o .docx)"),
+    prompt: str = Form("", description="Instrucciones adicionales del docente para el flujo"),
+    school_id: str = Form("colegio_demo", description="ID del colegio para acceder al repositorio S3 de materiales"),
     _user: dict = Depends(get_current_user),
 ):
     session_id = str(uuid.uuid4())
@@ -98,21 +113,40 @@ async def start_chat(
             material_path.unlink(missing_ok=True)
             SESSIONS.pop(session_id, None)
             raise HTTPException(status_code=500, detail="Error al guardar los archivos subidos")
-        background_tasks.add_task(
-            run_workflow_for_api,
+        task = asyncio.create_task(run_workflow_for_api(
             session_id=session_id,
             paci_path=str(paci_path),
             material_path=str(material_path),
             prompt=prompt,
             school_id=school_id,
-        )
+        ))
+        SESSIONS[session_id].task = task
 
     return {"session_id": session_id}
 
 
-@router.get("/{session_id}/stream")
+@router.get(
+    "/{session_id}/stream",
+    tags=["Chat"],
+    summary="Stream de eventos SSE de la sesión",
+    description=(
+        "Abre un stream Server-Sent Events (SSE) para seguir el progreso del workflow en tiempo real.\n\n"
+        "**Eventos posibles:**\n"
+        "- `message` — mensaje de progreso del agente\n"
+        "- `hitl_required` — el workflow pausó y requiere revisión docente; responder via `/hitl`\n"
+        "- `completed` — workflow finalizado; el DOCX está disponible en `/download`\n"
+        "- `error` — el workflow terminó con error\n"
+        "- `ping` — keepalive cada ~25s\n\n"
+        "Si el backend fue reiniciado y la sesión existe en DynamoDB, el endpoint emite el evento "
+        "terminal correspondiente sin necesidad de reconectar el workflow."
+    ),
+    responses={
+        200: {"description": "Stream SSE activo (Content-Type: text/event-stream)"},
+        404: {"description": "Sesión no encontrada"},
+        408: {"description": "Timeout esperando a que la sesión sea inicializada en memoria (modo AWS)"},
+    },
+)
 async def stream_session(session_id: str, _user: dict = Depends(get_current_user)):
-    """SSE endpoint — pushea eventos de progreso al frontend en tiempo real."""
     sd = SESSIONS.get(session_id)
 
     # La sesión puede existir en DynamoDB (creada por ms-docs) pero aún no en memoria
@@ -124,7 +158,41 @@ async def stream_session(session_id: str, _user: dict = Depends(get_current_user
             if sd is not None:
                 break
 
+    # Sesión no está en memoria — puede ser una sesión huérfana (backend reiniciado)
     if sd is None:
+        if dynamo_store.enabled():
+            item = dynamo_store.get_session(session_id)
+            if item:
+                phase = item.get("phase", "error")
+                _sse_headers = {
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                    "Content-Encoding": "identity",
+                }
+                if phase in ("completed", "error"):
+                    # Sesión ya terminada pero no en memoria: emitir evento terminal inmediato
+                    event = {
+                        "type": "completed" if phase == "completed" else "error",
+                        "workflow_status": item.get("workflow_status") or None,
+                        "message": item.get("error") or "",
+                    }
+                    async def _done_gen(ev=event):
+                        yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+                    return StreamingResponse(_done_gen(), media_type="text/event-stream", headers=_sse_headers)
+                else:
+                    # Sesión huérfana (running/awaiting_hitl sin workflow vivo)
+                    # Marcar como error en DynamoDB para que el frontend no vuelva a intentar
+                    _msg = "La sesión fue interrumpida (el servidor fue reiniciado) y no puede retomarse. Por favor inicia una nueva sesión."
+                    dynamo_store.update_session(
+                        session_id,
+                        phase="error",
+                        workflow_status="error",
+                        error=_msg,
+                    )
+                    async def _orphan_gen(msg=_msg):
+                        yield f"data: {json.dumps({'type': 'error', 'message': msg}, ensure_ascii=False)}\n\n"
+                    return StreamingResponse(_orphan_gen(), media_type="text/event-stream", headers=_sse_headers)
         raise HTTPException(status_code=404, detail="Sesión no encontrada")
 
     def _terminal_event(session_data) -> dict:
@@ -164,7 +232,17 @@ async def stream_session(session_id: str, _user: dict = Depends(get_current_user
     )
 
 
-@router.get("/{session_id}/state")
+@router.get(
+    "/{session_id}/state",
+    tags=["Chat"],
+    summary="Estado actual de la sesión",
+    description=(
+        "Retorna el estado actual de la sesión. Útil para polling cuando SSE no está disponible.\n\n"
+        "En modo AWS, consulta DynamoDB directamente (resistente a reinicios del backend)."
+    ),
+    response_model=SessionStateResponse,
+    responses={404: {"description": "Sesión no encontrada"}},
+)
 async def get_state(session_id: str, _user: dict = Depends(get_current_user)):
     if dynamo_store.enabled():
         item = dynamo_store.get_session(session_id)
@@ -190,7 +268,22 @@ async def get_state(session_id: str, _user: dict = Depends(get_current_user)):
     }
 
 
-@router.post("/{session_id}/hitl")
+@router.post(
+    "/{session_id}/hitl",
+    tags=["HITL"],
+    summary="Responder al checkpoint de revisión docente",
+    description=(
+        "Envía la decisión del docente sobre el plan de adaptación generado por el Agente Adaptador.\n\n"
+        "Solo válido cuando `phase == 'awaiting_hitl'`. La respuesta desbloquea el workflow, que "
+        "continuará con la generación de la rúbrica si fue aprobado, o reintentará el agente indicado "
+        "si fue rechazado. El flujo permite un máximo de 3 iteraciones HITL antes de continuar igual."
+    ),
+    response_model=OkResponse,
+    responses={
+        404: {"description": "Sesión no encontrada"},
+        409: {"description": "La sesión no está en estado awaiting_hitl"},
+    },
+)
 async def respond_hitl(session_id: str, body: HitlResponseBody, _user: dict = Depends(get_current_user)):
     sd = SESSIONS.get(session_id)
     if sd is None:
@@ -205,10 +298,62 @@ async def respond_hitl(session_id: str, body: HitlResponseBody, _user: dict = De
     return {"ok": True}
 
 
+@router.post(
+    "/{session_id}/cancel",
+    tags=["Chat"],
+    summary="Cancelar la sesión en curso",
+    description=(
+        "Cancela el workflow activo, marca la sesión como error con `workflow_status: cancelled` "
+        "y emite un evento SSE de error. También cancela la tarea asyncio subyacente."
+    ),
+    response_model=OkResponse,
+    responses={
+        404: {"description": "Sesión no encontrada"},
+        409: {"description": "La sesión ya ha terminado (completed o error)"},
+    },
+)
+async def cancel_session(session_id: str, _user: dict = Depends(get_current_user)):
+    sd = SESSIONS.get(session_id)
+    if sd is None:
+        raise HTTPException(status_code=404, detail="Sesión no encontrada")
+    if sd.phase in ("completed", "error"):
+        raise HTTPException(status_code=409, detail="La sesión ya ha terminado")
+
+    error_msg = "Sesión cancelada por el docente."
+    sd.cancelled = True
+    sd.phase = "error"
+    sd.workflow_status = "cancelled"
+    sd.error = error_msg
+
+    sd.event_queue.put_nowait({"type": "error", "message": error_msg, "workflow_status": "cancelled"})
+    sync_to_dynamo(session_id, sd)
+
+    # Cancelar la tarea asyncio — interrumpe el agente en el próximo await
+    if sd.task and not sd.task.done():
+        sd.task.cancel()
+
+    return {"ok": True}
+
+
 DOWNLOAD_URL_EXPIRES = int(os.environ.get("DOWNLOAD_URL_EXPIRES", "300"))
 
 
-@router.get("/{session_id}/download")
+@router.get(
+    "/{session_id}/download",
+    tags=["Chat"],
+    summary="Descargar el DOCX generado",
+    description=(
+        "Retorna la URL de descarga del documento DOCX con la rúbrica adaptada.\n\n"
+        "**Modo AWS:** retorna un presigned URL de S3 con expiración configurable "
+        "(default 300s via `DOWNLOAD_URL_EXPIRES`).\n\n"
+        "**Modo local:** retorna el archivo directamente como `FileResponse`.\n\n"
+        "Solo disponible cuando `phase == 'completed'`."
+    ),
+    response_model=DownloadResponse,
+    responses={
+        404: {"description": "Sesión no encontrada o resultado aún no disponible"},
+    },
+)
 async def download_result(session_id: str, _user: dict = Depends(get_current_user)):
     if dynamo_store.enabled():
         item = dynamo_store.get_session(session_id)
@@ -246,11 +391,26 @@ async def download_result(session_id: str, _user: dict = Depends(get_current_use
 
 # ── Internal endpoint (called by Lambda) ─────────────────────────────────────
 
-@router.post("/internal/run/{session_id}")
+@router.post(
+    "/internal/run/{session_id}",
+    tags=["Internal"],
+    summary="Iniciar workflow desde Lambda (trigger S3)",
+    description=(
+        "Llamado exclusivamente por la Lambda `prisma-trigger` tras recibir el evento PUT de S3. "
+        "Verifica el token interno, recupera los metadatos de DynamoDB y lanza el workflow "
+        "como tarea asyncio en el backend.\n\n"
+        "Requiere el header `X-Internal-Token` con el mismo valor que la variable de entorno "
+        "`INTERNAL_TOKEN` del backend y de la Lambda."
+    ),
+    response_model=InternalRunResponse,
+    responses={
+        401: {"description": "Token interno inválido o ausente"},
+        404: {"description": "Sesión no encontrada en DynamoDB"},
+    },
+)
 async def internal_run(
     session_id: str,
-    background_tasks: BackgroundTasks,
-    x_internal_token: Optional[str] = Header(None),
+    x_internal_token: Optional[str] = Header(None, description="Token secreto compartido con la Lambda"),
 ):
     if INTERNAL_TOKEN and x_internal_token != INTERNAL_TOKEN:
         raise HTTPException(status_code=401, detail="Token interno inválido")
@@ -263,12 +423,12 @@ async def internal_run(
     if session_id not in SESSIONS:
         SESSIONS[session_id] = SessionData()
 
-    background_tasks.add_task(
-        run_workflow_for_api,
+    task = asyncio.create_task(run_workflow_for_api(
         session_id=session_id,
         paci_s3_key=item["paci_s3_key"],
         material_s3_key=item["material_s3_key"],
         prompt=item["prompt"],
         school_id=item["school_id"],
-    )
+    ))
+    SESSIONS[session_id].task = task
     return {"started": True}

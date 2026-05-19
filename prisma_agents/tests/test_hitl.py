@@ -4,6 +4,7 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import pytest
 from unittest.mock import MagicMock, patch
 
 
@@ -43,17 +44,20 @@ class TestClassifyResponse:
 
 
 class TestHitlCheckpoint:
-    """Tests para la función _hitl_checkpoint()."""
+    """Tests para la función _hitl_checkpoint() (async)."""
 
     def _make_state(self, perfil="Diagnóstico: TDAH. Estrategias: tiempo extendido.", plan="Adecuación: NO SIGNIFICATIVA."):
         return {"perfil_paci": perfil, "planificacion_adaptada": plan}
+
+    def _run(self, coro):
+        return asyncio.run(coro)
 
     def test_aprobacion_devuelve_true(self):
         from agent import _hitl_checkpoint
         state = self._make_state()
         with patch("builtins.input", return_value="si, todo bien"), \
              patch("agent._classify_response", return_value=True):
-            aprobado, razon, agente = _hitl_checkpoint(state, attempt=1, max_attempts=6)
+            aprobado, razon, agente = self._run(_hitl_checkpoint(state, attempt=1, max_attempts=6))
         assert aprobado is True
         assert razon == ""
         assert agente == 0
@@ -63,7 +67,7 @@ class TestHitlCheckpoint:
         state = self._make_state()
         with patch("builtins.input", side_effect=["no, el análisis está incompleto", "1"]), \
              patch("agent._classify_response", return_value=False):
-            aprobado, razon, agente = _hitl_checkpoint(state, attempt=1, max_attempts=6)
+            aprobado, razon, agente = self._run(_hitl_checkpoint(state, attempt=1, max_attempts=6))
         assert aprobado is False
         assert razon == "no, el análisis está incompleto"
         assert agente == 1
@@ -73,7 +77,7 @@ class TestHitlCheckpoint:
         state = self._make_state()
         with patch("builtins.input", side_effect=["la adaptación no aplica DUA", "2"]), \
              patch("agent._classify_response", return_value=False):
-            aprobado, razon, agente = _hitl_checkpoint(state, attempt=1, max_attempts=6)
+            aprobado, razon, agente = self._run(_hitl_checkpoint(state, attempt=1, max_attempts=6))
         assert aprobado is False
         assert razon == "la adaptación no aplica DUA"
         assert agente == 2
@@ -81,10 +85,9 @@ class TestHitlCheckpoint:
     def test_entrada_invalida_de_agente_repregunta(self):
         from agent import _hitl_checkpoint
         state = self._make_state()
-        # Primera respuesta inválida ("3"), segunda válida ("2")
         with patch("builtins.input", side_effect=["no está bien", "3", "2"]), \
              patch("agent._classify_response", return_value=False):
-            aprobado, razon, agente = _hitl_checkpoint(state, attempt=1, max_attempts=6)
+            aprobado, razon, agente = self._run(_hitl_checkpoint(state, attempt=1, max_attempts=6))
         assert agente == 2
 
     def test_ultimo_intento_rechazado_retorna_agente_0(self):
@@ -93,9 +96,40 @@ class TestHitlCheckpoint:
         state = self._make_state()
         with patch("builtins.input", return_value="no, sigue mal"), \
              patch("agent._classify_response", return_value=False):
-            aprobado, razon, agente = _hitl_checkpoint(state, attempt=6, max_attempts=6)
+            aprobado, razon, agente = self._run(_hitl_checkpoint(state, attempt=6, max_attempts=6))
         assert aprobado is False
         assert agente == 0
+
+
+class TestHitlCheckpointApiMode:
+    """Tests para _hitl_checkpoint en modo API (api_session_id presente)."""
+
+    def _run(self, coro):
+        return asyncio.run(coro)
+
+    def test_api_mode_invokes_callback(self):
+        from agent import _hitl_checkpoint
+        from api.session_store import HITL_CALLBACKS
+
+        async def fake_callback(state, attempt, max_attempts):
+            return True, "", 0
+
+        HITL_CALLBACKS["sess-api-001"] = fake_callback
+        state = {"perfil_paci": "NEE: TDAH", "planificacion_adaptada": "Plan",
+                 "api_session_id": "sess-api-001"}
+        aprobado, razon, agente = self._run(_hitl_checkpoint(state, attempt=1, max_attempts=6))
+        HITL_CALLBACKS.pop("sess-api-001", None)
+        assert aprobado is True
+        assert agente == 0
+
+    def test_api_mode_no_callback_raises(self):
+        from agent import _hitl_checkpoint
+        from api.session_store import HITL_CALLBACKS
+        HITL_CALLBACKS.pop("sess-no-cb", None)
+
+        state = {"api_session_id": "sess-no-cb"}
+        with pytest.raises(RuntimeError, match="HITL callback"):
+            self._run(_hitl_checkpoint(state, attempt=1, max_attempts=6))
 
 
 class TestHitlLoop:

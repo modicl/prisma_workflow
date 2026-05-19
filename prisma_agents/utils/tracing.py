@@ -52,4 +52,8 @@ def setup_tracing() -> bool:
 
 
 def _langfuse_host() -> str:
-    return os.environ.get("LANGFUSE_HOST", "https://cloud.langfuse.com")
+    return (
+        os.environ.get("LANGFUSE_HOST")
+        or os.environ.get("LANGFUSE_BASE_URL")
+        or "https://cloud.langfuse.com"
+    )

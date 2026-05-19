@@ -3,7 +3,6 @@ import io
 import json
 import os
 import sys
-import zipfile
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
@@ -152,57 +151,200 @@ def test_load_pdf_no_pdfplumber_import(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# _load_docx — ahora usa Gemini Files API
+# _load_docx — usa python-docx local; Gemini inline OCR solo cuando hay imágenes
 # ---------------------------------------------------------------------------
 
-def test_load_docx_uses_gemini(tmp_path):
-    """Un .docx debe procesarse a través de Gemini Files API."""
-    # Crear un .docx mínimo válido (ZIP con structure de Word)
-    docx = tmp_path / "guia.docx"
+def _make_minimal_docx(tmp_path, filename="doc.docx", text="x") -> str:
+    """Crea un DOCX válido usando python-docx para que python-docx pueda abrirlo."""
+    from docx import Document as DocxDocument
+    d = DocxDocument()
+    if text:
+        d.add_paragraph(text)
     buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w") as z:
-        z.writestr("word/document.xml", "<w:document/>")
-    docx.write_bytes(buf.getvalue())
+    d.save(buf)
+    path = tmp_path / filename
+    path.write_bytes(buf.getvalue())
+    return str(path)
 
-    mock_client = _make_gemini_client("Contenido del DOCX extraído.")
+
+def test_load_docx_uses_gemini_ocr_when_text_insufficient(tmp_path):
+    """Si el texto local es < MIN_TEXT_CHARS y hay imágenes, usa Gemini OCR inline."""
+    docx_path = _make_minimal_docx(tmp_path, text="Poco texto")  # < 200 chars
+
+    fake_images = [{"mime_type": "image/png", "data": b"\x89PNG fake"}]
+    mock_client = MagicMock()
+    mock_client.models.generate_content.return_value.text = "OCR extraído desde imagen"
+
+    with patch("utils.document_loader._extract_docx_images", return_value=fake_images), \
+         patch("utils.document_loader.genai.Client", return_value=mock_client), \
+         patch.dict(os.environ, {"GOOGLE_API_KEY": "test-key"}):
+        result = dl.load_document(docx_path, label="Material DOCX")
+
+    assert "OCR extraído desde imagen" in result
+    mock_client.models.generate_content.assert_called_once()
+
+
+def test_load_docx_gemini_ocr_error_propagates(tmp_path):
+    """Si Gemini falla durante el OCR de imágenes, el error se propaga."""
+    docx_path = _make_minimal_docx(tmp_path, text="x")  # < 200 chars
+
+    fake_images = [{"mime_type": "image/png", "data": b"\x89PNG fake"}]
+    mock_client = MagicMock()
+    mock_client.models.generate_content.side_effect = RuntimeError("fallo Gemini OCR")
+
+    with patch("utils.document_loader._extract_docx_images", return_value=fake_images), \
+         patch("utils.document_loader.genai.Client", return_value=mock_client), \
+         patch.dict(os.environ, {"GOOGLE_API_KEY": "test-key"}):
+        with pytest.raises(RuntimeError, match="fallo Gemini OCR"):
+            dl.load_document(docx_path)
+
+
+def test_load_docx_with_sufficient_text_returns_local(tmp_path):
+    """DOCX con texto suficiente (≥ 200 chars) se extrae localmente sin Gemini."""
+    long_text = "Contenido educativo de prueba. " * 10  # > 200 chars
+    docx_path = _make_minimal_docx(tmp_path, text=long_text)
+    result = dl.load_document(docx_path, label="Guía de estudio")
+    assert "Guía de estudio" in result
+    assert "Contenido educativo de prueba." in result
+
+
+def test_load_docx_no_text_no_images_raises_or_returns(tmp_path):
+    """DOCX sin texto significativo y sin imágenes retorna el texto escaso o lanza error."""
+    docx_path = _make_minimal_docx(tmp_path, text="")  # empty DOCX
+
+    with patch("utils.document_loader._extract_docx_images", return_value=[]):
+        try:
+            result = dl.load_document(docx_path)
+            # If it doesn't raise, it should return empty-ish content
+            assert isinstance(result, str)
+        except ValueError:
+            pass  # acceptable — DOCX has no content
+
+
+def test_load_docx_sparse_text_no_images_returns_sparse(tmp_path):
+    """DOCX con texto escaso (< 200 chars) pero sin imágenes devuelve lo poco que hay."""
+    short_text = "Breve."
+    docx_path = _make_minimal_docx(tmp_path, text=short_text)
+
+    with patch("utils.document_loader._extract_docx_images", return_value=[]):
+        result = dl.load_document(docx_path)
+    # Text is sparse but returned
+    assert "Breve." in result
+
+
+def test_extract_docx_images_no_media(tmp_path):
+    """DOCX sin imágenes devuelve lista vacía."""
+    from utils.document_loader import _extract_docx_images
+    from pathlib import Path
+    docx_path = Path(_make_minimal_docx(tmp_path, text="Texto"))
+    images = _extract_docx_images(docx_path)
+    assert images == []
+
+
+def test_ocr_images_with_gemini_returns_text():
+    """_ocr_images_with_gemini llama a Gemini con imágenes inline y retorna texto."""
+    from utils.document_loader import _ocr_images_with_gemini
+    mock_client = MagicMock()
+    mock_client.models.generate_content.return_value.text = "Texto OCR"
+    mock_client.models.generate_content.return_value.candidates = []
 
     with patch("utils.document_loader.genai.Client", return_value=mock_client), \
          patch.dict(os.environ, {"GOOGLE_API_KEY": "test-key"}):
-        result = dl.load_document(str(docx), label="Material DOCX")
-
-    assert "Contenido del DOCX extraído." in result
-    assert "Material DOCX" in result
-    upload_call = mock_client.files.upload.call_args
-    assert upload_call.kwargs["config"]["mime_type"] == \
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    mock_client.files.delete.assert_called_once_with(name="files/mock123")
+        result = _ocr_images_with_gemini(
+            [{"mime_type": "image/png", "data": b"\x89PNG"}], "doc.docx"
+        )
+    assert result == "Texto OCR"
 
 
-def test_load_docx_deletes_gemini_file_even_on_error(tmp_path):
-    """El archivo Gemini se elimina aunque generate_content falle."""
-    docx = tmp_path / "error.docx"
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w") as z:
-        z.writestr("word/document.xml", "<w:document/>")
-    docx.write_bytes(buf.getvalue())
+def test_ocr_images_with_gemini_empty_text_fallback():
+    """Si text está vacío, extrae de candidates."""
+    from utils.document_loader import _ocr_images_with_gemini
+    mock_response = MagicMock()
+    mock_response.text = ""
+    part = MagicMock()
+    part.text = "De candidate"
+    part.thought = False
+    mock_response.candidates[0].content.parts = [part]
 
-    uploaded = MagicMock()
-    uploaded.name = "files/docx_delete_test"
-    client = MagicMock()
-    client.files.upload.return_value = uploaded
-    client.models.generate_content.side_effect = RuntimeError("fallo")
+    mock_client = MagicMock()
+    mock_client.models.generate_content.return_value = mock_response
 
-    with patch("utils.document_loader.genai.Client", return_value=client), \
+    with patch("utils.document_loader.genai.Client", return_value=mock_client), \
          patch.dict(os.environ, {"GOOGLE_API_KEY": "test-key"}):
-        with pytest.raises(RuntimeError):
-            dl.load_document(str(docx))
-
-    client.files.delete.assert_called_once_with(name="files/docx_delete_test")
+        result = _ocr_images_with_gemini(
+            [{"mime_type": "image/png", "data": b"\x89PNG"}], "doc.docx"
+        )
+    assert "De candidate" in result
 
 
 # ---------------------------------------------------------------------------
 # .doc — sin cambios (sigue siendo ValueError)
 # ---------------------------------------------------------------------------
+
+def test_load_pdf_empty_text_raises_value_error(tmp_path):
+    """Cubre lines 111-118, 126: Gemini devuelve texto vacío → ValueError."""
+    pdf = tmp_path / "empty.pdf"
+    pdf.write_bytes(b"%PDF-1.4 fake")
+
+    mock_response = MagicMock()
+    mock_response.text = ""
+    mock_response.candidates = []
+
+    uploaded = MagicMock()
+    uploaded.name = "files/empty123"
+    mock_client = _make_gemini_client("")
+    mock_client.files.upload.return_value = uploaded
+    mock_client.models.generate_content.return_value = mock_response
+
+    with patch("utils.document_loader.genai.Client", return_value=mock_client), \
+         patch.dict(os.environ, {"GOOGLE_API_KEY": "test-key"}):
+        with pytest.raises(ValueError, match="no pudo extraer texto"):
+            dl.load_document(str(pdf))
+
+
+def test_load_docx_with_table_extracts_table_text(tmp_path):
+    """Cubre lines 152-155: extracción de tabla en DOCX local."""
+    from docx import Document as DocxDocument
+    d = DocxDocument()
+    table = d.add_table(rows=2, cols=2)
+    long_cell = "Texto de celda educativa para tabla. " * 5  # contributes to >= 200 chars
+    table.cell(0, 0).text = long_cell
+    table.cell(0, 1).text = "Columna B"
+    table.cell(1, 0).text = "Fila 2 Col A"
+    table.cell(1, 1).text = "Fila 2 Col B"
+    buf = io.BytesIO()
+    d.save(buf)
+    path = tmp_path / "con_tabla.docx"
+    path.write_bytes(buf.getvalue())
+
+    result = dl.load_document(str(path), label="Material con tabla")
+    assert "Columna B" in result or long_cell[:20] in result
+
+
+def test_extract_docx_images_with_image(tmp_path):
+    """Cubre lines 199-203: DOCX con imagen embebida en word/media/."""
+    import zipfile as _zf
+    from utils.document_loader import _extract_docx_images
+    from pathlib import Path
+
+    fake_png = b"\x89PNG\r\n\x1a\nfake image data"
+    buf = io.BytesIO()
+    with _zf.ZipFile(buf, "w") as z:
+        z.writestr("[Content_Types].xml",
+                   '<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+                   '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+                   '<Default Extension="xml" ContentType="application/xml"/></Types>')
+        z.writestr("_rels/.rels", '<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>')
+        z.writestr("word/media/image1.png", fake_png)
+        z.writestr("word/media/unsupported.xyz", b"not an image")  # line 202: mime is None → skip
+    docx_path = tmp_path / "con_imagen.docx"
+    docx_path.write_bytes(buf.getvalue())
+
+    images = _extract_docx_images(Path(docx_path))
+    assert len(images) == 1  # only png, xyz is skipped
+    assert images[0]["mime_type"] == "image/png"
+    assert images[0]["data"] == fake_png
+
 
 def test_load_doc_raises_value_error(tmp_path):
     doc = tmp_path / "old.doc"

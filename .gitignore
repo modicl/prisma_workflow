@@ -19,3 +19,5 @@ prisma_agents/token_reports/
 
 node_modules/
 dist/
+
+CLAUDE.md
