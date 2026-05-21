@@ -10,6 +10,7 @@ Ejemplos:
 """
 
 import asyncio
+import json
 import sys
 import os
 import uuid
@@ -29,12 +30,56 @@ from google.genai.types import Content, Part
 
 # Importar root_agent y utilidades desde el paquete
 sys.path.insert(0, os.path.dirname(__file__))
-from agent import root_agent
+from agent import root_agent, _extract_subject_grade
+from utils.curriculum_catalog import normalize_subject, normalize_grade
 from utils.document_loader import load_document
 from utils.document_exporter import export_results_to_docx
 from utils.input_validator import validate_prompt_docente
 
 APP_NAME = "paci_workflow"
+
+_NEE_KEYWORDS = ["TEA", "TDAH", "DI", "TEL", "Disfasia", "DM", "DV", "DA", "DEA"]
+
+
+def _extract_diagnostico(perfil_paci: str) -> str:
+    """Extrae el tipo de diagnóstico NEE del texto de perfil_paci por keyword matching."""
+    text_upper = perfil_paci.upper()
+    for kw in _NEE_KEYWORDS:
+        if kw.upper() in text_upper:
+            return kw
+    return "otro"
+
+
+def _enrich_trace_span(state: dict, channel: str) -> None:
+    """Actualiza el span OTEL activo con metadata post-run extraída del estado final."""
+    from opentelemetry import trace as _otel_trace
+
+    perfil = state.get("perfil_paci", "")
+    subject_raw, grade_raw = _extract_subject_grade(perfil)
+    subject = normalize_subject(subject_raw) or subject_raw or "desconocida"
+    grade = normalize_grade(grade_raw) or grade_raw or "desconocido"
+    diagnostico = _extract_diagnostico(perfil)
+    status = state.get("status", "success")
+
+    tags = [
+        channel,
+        f"materia:{subject}",
+        f"curso:{grade}",
+        f"diagnostico:{diagnostico}",
+        status,
+    ]
+
+    try:
+        span = _otel_trace.get_current_span()
+        span.set_attribute("langfuse.tags", json.dumps(tags))
+        span.set_attribute("langfuse.metadata.materia", subject)
+        span.set_attribute("langfuse.metadata.curso", grade)
+        span.set_attribute("langfuse.metadata.diagnostico", diagnostico)
+        span.set_attribute("langfuse.metadata.status", status)
+        span.set_attribute("langfuse.metadata.channel", channel)
+        span.set_attribute("langfuse.metadata.school_id", state.get("school_id") or "sin_colegio")
+    except Exception:
+        pass
 
 
 async def run_workflow(paci_path: str, material_path: str, prompt: str = "", user_id: str = "", school_id: str = "", api_session_id: str = "") -> dict:
@@ -104,14 +149,19 @@ async def run_workflow(paci_path: str, material_path: str, prompt: str = "", use
     mensaje_inicial = prompt if prompt else "Inicia el flujo PACI con los documentos proporcionados."
 
     from langfuse import propagate_attributes
+    channel = "api" if api_session_id else "cli"
     trace_session_id = api_session_id if api_session_id else effective_user_id
-    metadata = {"school_id": school_id} if school_id else {}
 
     with propagate_attributes(
         user_id=effective_user_id,
         session_id=trace_session_id,
         trace_name="paci-workflow",
-        metadata=metadata,
+        metadata={
+            "school_id": school_id or "sin_colegio",
+            "channel": channel,
+            "env": os.environ.get("ENV", "dev"),
+        },
+        tags=[channel],
     ):
         async for event in runner.run_async(
             user_id=effective_user_id,
@@ -120,11 +170,14 @@ async def run_workflow(paci_path: str, material_path: str, prompt: str = "", use
         ):
             pass
 
-    # Recuperar resultados del estado de sesión
-    final_session = await session_service.get_session(
-        app_name=APP_NAME, user_id=effective_user_id, session_id=session.id
-    )
-    state = final_session.state
+        # Recuperar estado mientras el span OTEL todavía está activo
+        final_session = await session_service.get_session(
+            app_name=APP_NAME, user_id=effective_user_id, session_id=session.id
+        )
+        _state = final_session.state
+        _enrich_trace_span(_state, channel)
+
+    state = _state
 
     results = {
         "status": state.get("status", "success"),
