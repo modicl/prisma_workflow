@@ -60,3 +60,13 @@ class HitlResponseBody(BaseModel):
         None,
         description="Agente a reintentar en caso de rechazo: 1=AnalizadorPACI, 2=Adaptador",
     )
+
+
+class ApprovalFeedbackRequest(BaseModel):
+    trace_id: str = Field(..., min_length=1, description="ID de la traza Langfuse a evaluar")
+    approved: bool = Field(..., description="True si el docente aprueba la rúbrica generada")
+    comment: Optional[str] = Field(None, description="Comentario opcional del docente")
+
+
+class FeedbackResponse(BaseModel):
+    success: bool = Field(..., description="True si el score fue registrado en Langfuse")
