@@ -10,7 +10,6 @@ Ejemplos:
 """
 
 import asyncio
-import json
 import sys
 import os
 import uuid
@@ -30,54 +29,38 @@ from google.genai.types import Content, Part
 
 # Importar root_agent y utilidades desde el paquete
 sys.path.insert(0, os.path.dirname(__file__))
-from agent import root_agent, _extract_subject_grade
+from agent import root_agent, _extract_metadatos
 from utils.curriculum_catalog import normalize_subject, normalize_grade
+from utils.nee_taxonomy import normalize_diagnostico
 from utils.document_loader import load_document
 from utils.document_exporter import export_results_to_docx
 from utils.input_validator import validate_prompt_docente
 
 APP_NAME = "paci_workflow"
 
-_NEE_KEYWORDS = ["TEA", "TDAH", "DI", "TEL", "Disfasia", "DM", "DV", "DA", "DEA"]
-
-
-def _extract_diagnostico(perfil_paci: str) -> str:
-    """Extrae el tipo de diagnóstico NEE del texto de perfil_paci por keyword matching."""
-    text_upper = perfil_paci.upper()
-    for kw in _NEE_KEYWORDS:
-        if kw.upper() in text_upper:
-            return kw
-    return "otro"
-
 
 def _enrich_trace_span(state: dict, channel: str) -> None:
-    """Actualiza el span OTEL activo con metadata post-run extraída del estado final."""
-    from opentelemetry import trace as _otel_trace
+    """Actualiza el span Langfuse activo con metadata post-run extraída del estado final."""
+    from langfuse import get_client
 
     perfil = state.get("perfil_paci", "")
-    subject_raw, grade_raw = _extract_subject_grade(perfil)
-    subject = normalize_subject(subject_raw) or subject_raw or "desconocida"
-    grade = normalize_grade(grade_raw) or grade_raw or "desconocido"
-    diagnostico = _extract_diagnostico(perfil)
+    meta = _extract_metadatos(perfil)
+    subject = normalize_subject(meta["ramo"]) or meta["ramo"] or "desconocida"
+    grade = normalize_grade(meta["curso"]) or meta["curso"] or "desconocido"
+    diagnostico = normalize_diagnostico(meta["diagnostico"])
     status = state.get("status", "success")
 
-    tags = [
-        channel,
-        f"materia:{subject}",
-        f"curso:{grade}",
-        f"diagnostico:{diagnostico}",
-        status,
-    ]
-
     try:
-        span = _otel_trace.get_current_span()
-        span.set_attribute("langfuse.tags", json.dumps(tags))
-        span.set_attribute("langfuse.metadata.materia", subject)
-        span.set_attribute("langfuse.metadata.curso", grade)
-        span.set_attribute("langfuse.metadata.diagnostico", diagnostico)
-        span.set_attribute("langfuse.metadata.status", status)
-        span.set_attribute("langfuse.metadata.channel", channel)
-        span.set_attribute("langfuse.metadata.school_id", state.get("school_id") or "sin_colegio")
+        get_client().update_current_span(
+            metadata={
+                "materia": subject,
+                "curso": grade,
+                "diagnostico": diagnostico,
+                "status": status,
+                "channel": channel,
+                "school_id": state.get("school_id") or "sin_colegio",
+            }
+        )
     except Exception:
         pass
 

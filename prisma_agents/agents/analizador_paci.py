@@ -112,10 +112,32 @@ contenido solicitado usando los encabezados indicados.
 
 Al finalizar tu análisis, agrega siempre esta sección con exactamente este formato \
 (sin modificar los marcadores):
+
 ---METADATOS---
 RAMO: <nombre de la asignatura del estudiante, ej: Matemáticas>
 CURSO: <nivel del estudiante, ej: 5° Básico>
----FIN_METADATOS---"""
+DIAGNOSTICO: <ID canónico del diagnóstico — usa EXACTAMENTE uno de la tabla de abajo>
+---FIN_METADATOS---
+
+TABLA DE IDs CANÓNICOS — escribe el valor de DIAGNOSTICO usando exactamente uno de estos:
+
+PERMANENTES:
+  TEA        → Trastorno del Espectro Autista
+  DI         → Discapacidad Intelectual
+  DV         → Discapacidad Visual (baja visión / ceguera)
+  DA         → Discapacidad Auditiva (hipoacusia / sordera)
+  DM         → Discapacidad Motora
+  Disfasia   → Trastorno Severo del Lenguaje
+  Sordoceguera → Sordoceguera / Discapacidad Múltiple
+
+TRANSITORIAS:
+  TDAH       → Trastorno de Déficit Atencional con/sin Hiperactividad (TDA/TDAH)
+  TEL        → Trastorno Específico del Lenguaje
+  DEA        → Dificultad Específica del Aprendizaje (dislexia, discalculia, disgrafía)
+  CIL        → Coeficiente Intelectual Limítrofe (FIL)
+
+Ejemplo correcto: DIAGNOSTICO: TEA
+Ejemplo incorrecto: DIAGNOSTICO: Trastorno del Espectro Autista"""
 
 def make_analizador_paci_agent() -> LlmAgent:
     return LlmAgent(
