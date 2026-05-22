@@ -7,6 +7,7 @@ from fastapi import FastAPI
 load_dotenv(Path(__file__).parent.parent / ".env")
 
 from api.chat_router import router as chat_router
+from api.feedback_router import router as feedback_router
 
 _CORS_HEADERS = [
     (b"access-control-allow-origin", b"*"),
@@ -144,6 +145,7 @@ al recibir un evento `hitl_required`. El flujo tiene un máximo de 3 iteraciones
 app.add_middleware(CORSMiddleware)
 
 app.include_router(chat_router)
+app.include_router(feedback_router)
 
 
 @app.get("/health", tags=["System"], summary="Health check")
