@@ -131,34 +131,35 @@ async def run_workflow(paci_path: str, material_path: str, prompt: str = "", use
     # Mensaje inicial para activar el flujo
     mensaje_inicial = prompt if prompt else "Inicia el flujo PACI con los documentos proporcionados."
 
-    from langfuse import propagate_attributes
+    from langfuse import get_client, propagate_attributes
     channel = "api" if api_session_id else "cli"
     trace_session_id = api_session_id if api_session_id else effective_user_id
 
-    with propagate_attributes(
-        user_id=effective_user_id,
-        session_id=trace_session_id,
-        trace_name="paci-workflow",
-        metadata={
-            "school_id": school_id or "sin_colegio",
-            "channel": channel,
-            "env": os.environ.get("ENV", "dev"),
-        },
-        tags=[channel],
-    ):
-        async for event in runner.run_async(
+    with get_client().start_as_current_observation(name="paci-workflow"):
+        with propagate_attributes(
             user_id=effective_user_id,
-            session_id=session.id,
-            new_message=Content(parts=[Part(text=mensaje_inicial)]),
+            session_id=trace_session_id,
+            trace_name="paci-workflow",
+            metadata={
+                "school_id": school_id or "sin_colegio",
+                "channel": channel,
+                "env": os.environ.get("ENV", "dev"),
+            },
+            tags=[channel],
         ):
-            pass
+            async for event in runner.run_async(
+                user_id=effective_user_id,
+                session_id=session.id,
+                new_message=Content(parts=[Part(text=mensaje_inicial)]),
+            ):
+                pass
 
-        # Recuperar estado mientras el span OTEL todavía está activo
-        final_session = await session_service.get_session(
-            app_name=APP_NAME, user_id=effective_user_id, session_id=session.id
-        )
-        _state = final_session.state
-        _enrich_trace_span(_state, channel)
+            # Recuperar estado con span raíz todavía activo → update_current_span funciona
+            final_session = await session_service.get_session(
+                app_name=APP_NAME, user_id=effective_user_id, session_id=session.id
+            )
+            _state = final_session.state
+            _enrich_trace_span(_state, channel)
 
     state = _state
 
