@@ -40,8 +40,8 @@ APP_NAME = "paci_workflow"
 
 
 def _enrich_trace_span(state: dict, channel: str) -> None:
-    """Actualiza el span Langfuse activo con metadata post-run extraída del estado final."""
-    from langfuse import get_client
+    """Añade metadata y tags post-run al span raíz activo via propagate_attributes."""
+    from langfuse import propagate_attributes
 
     perfil = state.get("perfil_paci", "")
     meta = _extract_metadatos(perfil)
@@ -51,16 +51,11 @@ def _enrich_trace_span(state: dict, channel: str) -> None:
     status = state.get("status", "success")
 
     try:
-        get_client().update_current_span(
-            metadata={
-                "materia": subject,
-                "curso": grade,
-                "diagnostico": diagnostico,
-                "status": status,
-                "channel": channel,
-                "school_id": state.get("school_id") or "sin_colegio",
-            }
-        )
+        with propagate_attributes(
+            tags=[channel, f"materia:{subject}", f"curso:{grade}", f"diagnostico:{diagnostico}", status],
+            metadata={"materia": subject, "curso": grade, "diagnostico": diagnostico, "status": status},
+        ):
+            pass
     except Exception:
         pass
 
@@ -154,12 +149,14 @@ async def run_workflow(paci_path: str, material_path: str, prompt: str = "", use
             ):
                 pass
 
-            # Recuperar estado con span raíz todavía activo → update_current_span funciona
             final_session = await session_service.get_session(
                 app_name=APP_NAME, user_id=effective_user_id, session_id=session.id
             )
             _state = final_session.state
-            _enrich_trace_span(_state, channel)
+
+        # Fuera del with propagate_attributes pero dentro de start_as_current_observation:
+        # aquí el span raíz es el único activo → propagate_attributes lo encuentra directamente
+        _enrich_trace_span(_state, channel)
 
     state = _state
 
