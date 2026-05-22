@@ -89,6 +89,22 @@ def _extract_subject_grade(perfil_paci: str) -> tuple[str, str]:
     return subject_raw, grade_raw
 
 
+def _extract_metadatos(perfil_paci: str) -> dict[str, str]:
+    """Extrae RAMO, CURSO y DIAGNOSTICO del bloque ---METADATOS--- generado por AnalizadorPACI."""
+    block_match = re.search(
+        r'---METADATOS---(.*?)---FIN_METADATOS---', perfil_paci, re.DOTALL
+    )
+    block = block_match.group(1) if block_match else perfil_paci
+    ramo_match = re.search(r'RAMO:\s*(.+)', block)
+    curso_match = re.search(r'CURSO:\s*(.+)', block)
+    diag_match = re.search(r'DIAGNOSTICO:\s*(.+)', block)
+    return {
+        "ramo": ramo_match.group(1).strip() if ramo_match else "",
+        "curso": curso_match.group(1).strip() if curso_match else "",
+        "diagnostico": diag_match.group(1).strip() if diag_match else "",
+    }
+
+
 _CLASSIFY_PROMPT = (
     "Clasifica si el siguiente mensaje de un docente indica APROBACIÓN o RECHAZO "
     "del trabajo presentado. Responde únicamente con \"APROBADO\" o \"RECHAZADO\".\n\n"

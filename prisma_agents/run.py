@@ -29,12 +29,35 @@ from google.genai.types import Content, Part
 
 # Importar root_agent y utilidades desde el paquete
 sys.path.insert(0, os.path.dirname(__file__))
-from agent import root_agent
+from agent import root_agent, _extract_metadatos
+from utils.curriculum_catalog import normalize_subject, normalize_grade
+from utils.nee_taxonomy import normalize_diagnostico
 from utils.document_loader import load_document
 from utils.document_exporter import export_results_to_docx
 from utils.input_validator import validate_prompt_docente
 
 APP_NAME = "paci_workflow"
+
+
+def _enrich_trace_span(state: dict, channel: str) -> None:
+    """Añade metadata y tags post-run al span raíz activo via propagate_attributes."""
+    from langfuse import propagate_attributes
+
+    perfil = state.get("perfil_paci", "")
+    meta = _extract_metadatos(perfil)
+    subject = normalize_subject(meta["ramo"]) or meta["ramo"] or "desconocida"
+    grade = normalize_grade(meta["curso"]) or meta["curso"] or "desconocido"
+    diagnostico = normalize_diagnostico(meta["diagnostico"])
+    status = state.get("status", "success")
+
+    try:
+        with propagate_attributes(
+            tags=[channel, f"materia:{subject}", f"curso:{grade}", f"diagnostico:{diagnostico}", status],
+            metadata={"materia": subject, "curso": grade, "diagnostico": diagnostico, "status": status},
+        ):
+            pass
+    except Exception:
+        pass
 
 
 async def run_workflow(paci_path: str, material_path: str, prompt: str = "", user_id: str = "", school_id: str = "", api_session_id: str = "") -> dict:
@@ -103,28 +126,39 @@ async def run_workflow(paci_path: str, material_path: str, prompt: str = "", use
     # Mensaje inicial para activar el flujo
     mensaje_inicial = prompt if prompt else "Inicia el flujo PACI con los documentos proporcionados."
 
-    from langfuse import propagate_attributes
+    from langfuse import get_client, propagate_attributes
+    channel = "api" if api_session_id else "cli"
     trace_session_id = api_session_id if api_session_id else effective_user_id
-    metadata = {"school_id": school_id} if school_id else {}
 
-    with propagate_attributes(
-        user_id=effective_user_id,
-        session_id=trace_session_id,
-        trace_name="paci-workflow",
-        metadata=metadata,
-    ):
-        async for event in runner.run_async(
+    with get_client().start_as_current_observation(name="paci-workflow"):
+        with propagate_attributes(
             user_id=effective_user_id,
-            session_id=session.id,
-            new_message=Content(parts=[Part(text=mensaje_inicial)]),
+            session_id=trace_session_id,
+            trace_name="paci-workflow",
+            metadata={
+                "school_id": school_id or "sin_colegio",
+                "channel": channel,
+                "env": os.environ.get("ENV", "dev"),
+            },
+            tags=[channel],
         ):
-            pass
+            async for event in runner.run_async(
+                user_id=effective_user_id,
+                session_id=session.id,
+                new_message=Content(parts=[Part(text=mensaje_inicial)]),
+            ):
+                pass
 
-    # Recuperar resultados del estado de sesión
-    final_session = await session_service.get_session(
-        app_name=APP_NAME, user_id=effective_user_id, session_id=session.id
-    )
-    state = final_session.state
+            final_session = await session_service.get_session(
+                app_name=APP_NAME, user_id=effective_user_id, session_id=session.id
+            )
+            _state = final_session.state
+
+        # Fuera del with propagate_attributes pero dentro de start_as_current_observation:
+        # aquí el span raíz es el único activo → propagate_attributes lo encuentra directamente
+        _enrich_trace_span(_state, channel)
+
+    state = _state
 
     results = {
         "status": state.get("status", "success"),
