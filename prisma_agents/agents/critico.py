@@ -1,4 +1,5 @@
 from google.adk.agents.llm_agent import LlmAgent
+from google.genai import types as genai_types
 from pydantic import BaseModel
 
 MODEL = "gemini-2.5-flash-lite"
@@ -100,4 +101,10 @@ def make_critico_agent() -> LlmAgent:
         output_schema=CriticoResponse,
         include_contents="none",
         description="Evalúa la rúbrica contra el Decreto 83/2015 y el perfil PACI. Responde en JSON.",
+        generate_content_config=genai_types.GenerateContentConfig(
+            temperature=0.1,
+            top_p=0.80,
+            top_k=20,
+            max_output_tokens=2048,
+        ),
     )

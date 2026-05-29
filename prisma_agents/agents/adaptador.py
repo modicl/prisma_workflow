@@ -1,4 +1,5 @@
 from google.adk.agents.llm_agent import LlmAgent
+from google.genai import types as genai_types
 
 MODEL = "gemini-2.5-flash-lite"
 
@@ -116,4 +117,11 @@ def make_adaptador_agent() -> LlmAgent:
         output_key="planificacion_adaptada",
         include_contents="none",
         description="Adapta el material educativo base al perfil NEE del estudiante aplicando DUA y el Decreto 83/2015.",
+        generate_content_config=genai_types.GenerateContentConfig(
+            temperature=0.65,
+            top_p=0.95,
+            top_k=50,
+            frequency_penalty=0.2,
+            max_output_tokens=16384,
+        ),
     )
