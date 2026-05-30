@@ -1,4 +1,5 @@
 from google.adk.agents.llm_agent import LlmAgent
+from google.genai import types as genai_types
 
 MODEL = "gemini-2.5-flash-lite"
 
@@ -147,4 +148,10 @@ def make_analizador_paci_agent() -> LlmAgent:
         output_key="perfil_paci",
         include_contents="none",
         description="Analiza el documento PACI y extrae NEE, perfil de aprendizaje, estrategias y objetivos del estudiante.",
+        generate_content_config=genai_types.GenerateContentConfig(
+            temperature=0.2,
+            top_p=0.88,
+            top_k=32,
+            max_output_tokens=8192,
+        ),
     )

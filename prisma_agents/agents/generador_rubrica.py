@@ -1,4 +1,5 @@
 from google.adk.agents.llm_agent import LlmAgent
+from google.genai import types as genai_types
 
 MODEL = "gemini-2.5-flash-lite"
 
@@ -126,4 +127,11 @@ def make_generador_rubrica_agent() -> LlmAgent:
         output_key="rubrica",
         include_contents="none",
         description="Genera una rúbrica de evaluación adaptada al perfil NEE del estudiante, cumpliendo el Decreto 83/2015.",
+        generate_content_config=genai_types.GenerateContentConfig(
+            temperature=0.4,
+            top_p=0.92,
+            top_k=40,
+            frequency_penalty=0.25,
+            max_output_tokens=8192,
+        ),
     )
