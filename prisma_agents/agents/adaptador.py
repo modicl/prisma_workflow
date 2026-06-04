@@ -121,7 +121,6 @@ def make_adaptador_agent() -> LlmAgent:
             temperature=0.65,
             top_p=0.95,
             top_k=50,
-            frequency_penalty=0.2,
             max_output_tokens=16384,
         ),
     )

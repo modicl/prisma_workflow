@@ -131,7 +131,6 @@ def make_generador_rubrica_agent() -> LlmAgent:
             temperature=0.4,
             top_p=0.92,
             top_k=40,
-            frequency_penalty=0.25,
             max_output_tokens=8192,
         ),
     )
