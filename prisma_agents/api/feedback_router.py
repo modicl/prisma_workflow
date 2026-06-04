@@ -15,16 +15,40 @@ router = APIRouter(prefix="/feedback", tags=["Feedback"])
 _LANGFUSE_HOST = os.environ.get("LANGFUSE_HOST", "https://us.cloud.langfuse.com")
 
 
-def register_teacher_approval(trace_id: str, approved: bool, comment: str | None) -> None:
+def _get_langfuse_credentials() -> tuple[str, str]:
+    pk = os.environ.get("LANGFUSE_PUBLIC_KEY")
+    sk = os.environ.get("LANGFUSE_SECRET_KEY")
+    if not pk or not sk:
+        raise RuntimeError("LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY no configuradas")
+    return pk, sk
+
+
+def _resolve_trace_id(session_id: str, pk: str, sk: str) -> str:
+    """Obtiene el trace_id de Langfuse a partir del session_id de PRISMA."""
+    resp = httpx.get(
+        f"{_LANGFUSE_HOST}/api/public/traces",
+        params={"sessionId": session_id, "limit": 1},
+        auth=(pk, sk),
+        timeout=10,
+    )
+    if resp.status_code != 200:
+        raise RuntimeError(f"Error consultando trazas Langfuse: {resp.status_code}")
+
+    traces = resp.json().get("data", [])
+    if not traces:
+        raise RuntimeError(f"No se encontró ninguna traza para session_id={session_id!r}")
+
+    return traces[0]["id"]
+
+
+def register_teacher_approval(session_id: str, approved: bool, comment: str | None) -> None:
     """Registra el feedback docente como score rubric_quality (BOOLEAN) en Langfuse.
 
-    Usa el endpoint REST /api/public/ingestion directamente para garantizar
-    una llamada síncrona sin depender del background queue del SDK.
+    Resuelve el trace_id a partir del session_id de PRISMA (que coincide con el
+    session_id registrado en Langfuse por propagate_attributes en run.py).
     """
-    public_key = os.environ.get("LANGFUSE_PUBLIC_KEY")
-    secret_key = os.environ.get("LANGFUSE_SECRET_KEY")
-    if not public_key or not secret_key:
-        raise RuntimeError("LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY no configuradas")
+    pk, sk = _get_langfuse_credentials()
+    trace_id = _resolve_trace_id(session_id, pk, sk)
 
     body: dict = {
         "id": uuid.uuid4().hex,
@@ -45,18 +69,17 @@ def register_teacher_approval(trace_id: str, approved: bool, comment: str | None
         }]
     }
 
-    with httpx.Client(timeout=10) as client:
-        response = client.post(
-            f"{_LANGFUSE_HOST}/api/public/ingestion",
-            json=payload,
-            auth=(public_key, secret_key),
-        )
+    resp = httpx.post(
+        f"{_LANGFUSE_HOST}/api/public/ingestion",
+        json=payload,
+        auth=(pk, sk),
+        timeout=10,
+    )
 
-    if response.status_code not in (200, 207):
-        raise RuntimeError(f"Langfuse ingestion error {response.status_code}: {response.text}")
+    if resp.status_code not in (200, 207):
+        raise RuntimeError(f"Langfuse ingestion error {resp.status_code}: {resp.text}")
 
-    data = response.json()
-    errors = data.get("errors", [])
+    errors = resp.json().get("errors", [])
     if errors:
         raise RuntimeError(f"Langfuse score rejected: {errors}")
 
@@ -67,14 +90,14 @@ def register_teacher_approval(trace_id: str, approved: bool, comment: str | None
     summary="Registrar aprobación o rechazo docente de la rúbrica generada",
     description=(
         "Recibe el feedback del docente (👍/👎) y lo persiste como score `rubric_quality` "
-        "en Langfuse Cloud sobre la traza indicada por `trace_id`. "
-        "El `author_user_id` se registra como autor nativo del score en Langfuse."
+        "en Langfuse Cloud. Resuelve el `trace_id` internamente a partir del `session_id` "
+        "de PRISMA, que ya está registrado como `session_id` en la traza de Langfuse."
     ),
 )
 async def post_teacher_approval(body: ApprovalFeedbackRequest) -> FeedbackResponse:
     try:
         register_teacher_approval(
-            trace_id=body.trace_id,
+            session_id=body.session_id,
             approved=body.approved,
             comment=body.comment,
         )
