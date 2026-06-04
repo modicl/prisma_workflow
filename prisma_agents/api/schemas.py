@@ -63,7 +63,7 @@ class HitlResponseBody(BaseModel):
 
 
 class ApprovalFeedbackRequest(BaseModel):
-    trace_id: str = Field(..., min_length=1, description="ID de la traza Langfuse a evaluar")
+    session_id: str = Field(..., min_length=1, description="ID de la sesión PRISMA — coincide con el session_id en Langfuse")
     approved: bool = Field(..., description="True si el docente aprueba la rúbrica generada")
     comment: Optional[str] = Field(None, description="Comentario opcional del docente")
 
