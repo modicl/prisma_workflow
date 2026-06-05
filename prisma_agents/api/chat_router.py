@@ -1,10 +1,13 @@
 import asyncio
 import json
+import logging
 import os
 import tempfile
 import uuid
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 import boto3
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Header, UploadFile
@@ -24,6 +27,17 @@ from api.session_store import SESSIONS, SessionData, sync_to_dynamo
 from api.workflow_runner import run_workflow_for_api
 
 router = APIRouter(prefix="/chat")
+
+
+def _assert_owner(owner_id: Optional[str], user_sub: str) -> None:
+    """Lanza 403 si el usuario no es el propietario de la sesión.
+
+    Si owner_id es None (sesiones pre-fix sin campo), se permite el acceso
+    para no romper sesiones existentes.
+    """
+    if owner_id is not None and owner_id != user_sub:
+        raise HTTPException(status_code=403, detail="No tienes acceso a esta sesión")
+
 
 # Local dev upload dir (used only when S3_BUCKET is not configured)
 UPLOAD_DIR = Path(tempfile.gettempdir()) / "prisma_uploads"
@@ -78,7 +92,8 @@ async def start_chat(
     paci_bytes = await paci_file.read()
     material_bytes = await material_file.read()
 
-    SESSIONS[session_id] = SessionData()
+    owner_sub = _user["sub"]
+    SESSIONS[session_id] = SessionData(owner_id=owner_sub)
 
     if S3_BUCKET:
         # Event-driven path: upload to S3, Lambda will call /internal/run
@@ -93,6 +108,7 @@ async def start_chat(
             material_s3_key=material_s3_key,
             prompt=prompt,
             school_id=school_id,
+            owner_id=owner_sub,
         )
         try:
             s3 = boto3.client("s3")
@@ -100,7 +116,8 @@ async def start_chat(
             s3.put_object(Bucket=S3_BUCKET, Key=material_s3_key, Body=material_bytes)
         except Exception as exc:
             SESSIONS.pop(session_id, None)
-            raise HTTPException(status_code=500, detail=f"Error al subir archivos a S3: {exc}")
+            logger.error("S3 upload failed for session %s: %s", session_id, exc)
+            raise HTTPException(status_code=500, detail="Error al subir archivos. Intente nuevamente.")
     else:
         # Local dev path: save to disk, launch background task directly
         paci_path = UPLOAD_DIR / f"{session_id}_paci{paci_ext}"
@@ -163,6 +180,7 @@ async def stream_session(session_id: str, _user: dict = Depends(get_current_user
         if dynamo_store.enabled():
             item = dynamo_store.get_session(session_id)
             if item:
+                _assert_owner(item.get("owner_id"), _user["sub"])
                 phase = item.get("phase", "error")
                 _sse_headers = {
                     "Cache-Control": "no-cache",
@@ -194,6 +212,8 @@ async def stream_session(session_id: str, _user: dict = Depends(get_current_user
                         yield f"data: {json.dumps({'type': 'error', 'message': msg}, ensure_ascii=False)}\n\n"
                     return StreamingResponse(_orphan_gen(), media_type="text/event-stream", headers=_sse_headers)
         raise HTTPException(status_code=404, detail="Sesión no encontrada")
+
+    _assert_owner(sd.owner_id, _user["sub"])
 
     def _terminal_event(session_data) -> dict:
         if session_data.phase == "completed":
@@ -248,6 +268,7 @@ async def get_state(session_id: str, _user: dict = Depends(get_current_user)):
         item = dynamo_store.get_session(session_id)
         if item is None:
             raise HTTPException(status_code=404, detail="Sesión no encontrada")
+        _assert_owner(item.get("owner_id"), _user["sub"])
         return {
             "phase":           item["phase"],
             "messages":        item["messages"],
@@ -259,6 +280,7 @@ async def get_state(session_id: str, _user: dict = Depends(get_current_user)):
     if session_id not in SESSIONS:
         raise HTTPException(status_code=404, detail="Sesión no encontrada")
     sd = SESSIONS[session_id]
+    _assert_owner(sd.owner_id, _user["sub"])
     return {
         "phase":           sd.phase,
         "messages":        sd.messages,
@@ -288,6 +310,7 @@ async def respond_hitl(session_id: str, body: HitlResponseBody, _user: dict = De
     sd = SESSIONS.get(session_id)
     if sd is None:
         raise HTTPException(status_code=404, detail="Sesión no encontrada")
+    _assert_owner(sd.owner_id, _user["sub"])
     if sd.phase != "awaiting_hitl":
         raise HTTPException(status_code=409, detail="La sesión no está esperando revisión HITL")
     await sd.hitl_response_queue.put({
@@ -316,6 +339,7 @@ async def cancel_session(session_id: str, _user: dict = Depends(get_current_user
     sd = SESSIONS.get(session_id)
     if sd is None:
         raise HTTPException(status_code=404, detail="Sesión no encontrada")
+    _assert_owner(sd.owner_id, _user["sub"])
     if sd.phase in ("completed", "error"):
         raise HTTPException(status_code=409, detail="La sesión ya ha terminado")
 
@@ -359,6 +383,7 @@ async def download_result(session_id: str, _user: dict = Depends(get_current_use
         item = dynamo_store.get_session(session_id)
         if item is None:
             raise HTTPException(status_code=404, detail="Sesión no encontrada")
+        _assert_owner(item.get("owner_id"), _user["sub"])
         if item.get("phase") != "completed" or not item.get("docx_s3_key"):
             raise HTTPException(status_code=404, detail="Resultado no disponible aún")
         s3 = boto3.client("s3", region_name=os.environ.get("AWS_REGION", "us-east-1"))
@@ -378,6 +403,7 @@ async def download_result(session_id: str, _user: dict = Depends(get_current_use
     if session_id not in SESSIONS:
         raise HTTPException(status_code=404, detail="Sesión no encontrada")
     sd = SESSIONS[session_id]
+    _assert_owner(sd.owner_id, _user["sub"])
     if sd.phase != "completed" or not sd.docx_path:
         raise HTTPException(status_code=404, detail="Resultado no disponible aún")
     if not Path(sd.docx_path).exists():
@@ -412,7 +438,7 @@ async def internal_run(
     session_id: str,
     x_internal_token: Optional[str] = Header(None, description="Token secreto compartido con la Lambda"),
 ):
-    if INTERNAL_TOKEN and x_internal_token != INTERNAL_TOKEN:
+    if not INTERNAL_TOKEN or x_internal_token != INTERNAL_TOKEN:
         raise HTTPException(status_code=401, detail="Token interno inválido")
 
     item = dynamo_store.get_session(session_id)
