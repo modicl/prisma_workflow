@@ -63,6 +63,7 @@ def create_session(session_id: str, **fields) -> None:
                 "material_s3_key": {"S": fields.get("material_s3_key", "")},
                 "prompt":          {"S": fields.get("prompt", "")},
                 "school_id":       {"S": fields.get("school_id", "")},
+                "owner_id":        {"S": fields.get("owner_id", "")},
                 "expires_at":      {"N": str(int(time.time()) + TTL_DAYS * 86400)},
             },
         )
@@ -103,6 +104,7 @@ def get_session(session_id: str) -> Optional[dict]:
         "material_s3_key": item.get("material_s3_key", {}).get("S", ""),
         "prompt":          item.get("prompt", {}).get("S", ""),
         "school_id":       item.get("school_id", {}).get("S", ""),
+        "owner_id":        item.get("owner_id", {}).get("S") or None,
     }
 
 

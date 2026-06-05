@@ -2,13 +2,18 @@ from google.adk.agents.llm_agent import LlmAgent
 from google.genai import types as genai_types
 from pydantic import BaseModel
 
-MODEL = "gemini-2.5-flash-lite"
+MODEL = "gemini-3.1-flash-lite"
 
 
 class CriticoResponse(BaseModel):
     acceptable: bool
+    must_regenerate: bool
+    score: int
     critique: str
     suggestions: list[str]
+    critical_issues: list[str]
+    warnings_for_teacher: list[str]
+    regeneration_instructions: str
 
 INSTRUCTION = """Eres un evaluador experto en normativa educacional chilena para la inclusión, \
 con especialización en el Decreto 83/2015 (Diversificación de la Enseñanza), el \
@@ -50,24 +55,40 @@ DECRETO 170/2010:
   pausas, reducción de distractores; DA → modalidad de respuesta alternativa; \
   TEL → respuesta oral o con apoyos comunicativos; DI → OA graduados en complejidad.
 
-CRITERIOS DE ACEPTABILIDAD:
-✔ ACEPTABLE si cumple TODOS:
-  1. Los criterios evalúan los OA del PACI (no OA generales si hay adecuaciones significativas)
-  2. Incluye sección de "Condiciones de Aplicación" coherente con el PACI
-  3. Tiene exactamente 4 niveles de desempeño con descriptores diferenciados
-  4. Al menos 2 criterios de evaluación bien definidos
-  5. Los descriptores usan verbos observables y son apropiados para el perfil NEE
-  6. El lenguaje es accesible (sin jerga clínica excesiva)
+CHECKLIST OBLIGATORIO — evalúa cada ítem explícitamente:
 
-✗ NO ACEPTABLE si presenta CUALQUIERA de:
-  - Menciones a "eximición", "eximir" o "promediar con otras notas" (PROHIBIDO tajantemente por el Art. 5 del Decreto 67).
-  - OA generales en lugar de los OA del PACI (con adecuaciones significativas)
-  - Ausencia de condiciones de acceso a la evaluación indicadas en el PACI
-  - Descriptores vagos, no observables o incoherentes con el diagnóstico
-  - Faltan uno o más de los 4 niveles de desempeño
-  - Lenguaje o exigencias inapropiadas para el nivel cognitivo/comunicativo del estudiante
-  - Descriptores que no pueden traducirse a la escala 1.0–7.0 del D67/2018
-  - Cualquier sugerencia de no evaluar al estudiante. La rúbrica SIEMPRE debe proveer una forma de evaluar, adaptada o alternativa.
+ÍTEMS CRÍTICOS (un solo fallo → critical_issues no vacío → must_regenerate=true + acceptable=false, independiente del score):
+  C1. PII expuesto: la rúbrica NO contiene nombre del estudiante, RUT ni identificador personal directo
+  C2. Diagnóstico expuesto: los descriptores NO mencionan el diagnóstico clínico del estudiante \
+      (ej. "el estudiante con TEA debe..." — PROHIBIDO)
+  C3. Lenguaje estigmatizante: los descriptores NO usan déficit-framing dirigido al estudiante \
+      (ej. "no es capaz de...", "presenta dificultades para..." como descriptor de nivel)
+  C4. Exención: NO hay menciones a "eximición", "eximir" o "promediar con otras notas" \
+      (PROHIBIDO por Art. 5 Decreto 67)
+
+ÍTEMS DE CALIDAD (contribuyen al score):
+  Q1. OA del PACI: los criterios evalúan los OA del PACI, no OA generales del curso \
+      (cuando hay adecuaciones significativas)
+  Q2. Condiciones de Aplicación: incluye sección coherente con el PACI (tiempo, modalidad, materiales)
+  Q3. 4 niveles de desempeño: exactamente Logrado / Medianamente Logrado / Por Lograr / No Logrado \
+      con descriptores diferenciados
+  Q4. Mínimo 2 criterios: al menos 2 criterios de evaluación bien definidos
+  Q5. Verbos observables: descriptores usan verbos medibles (identifica, produce, selecciona, etc.)
+  Q6. Coherencia NEE: descriptores apropiados para el nivel cognitivo/comunicativo del perfil
+  Q7. Escala D67: descriptores traducibles a escala 1.0–7.0 (mínimo aprobación 4.0)
+  Q8. Lenguaje accesible: sin jerga clínica excesiva en los descriptores
+
+SISTEMA DE PUNTUACIÓN (0–100):
+- Cada ítem de calidad (Q1–Q8) vale hasta 12.5 puntos (total 100 si todos se cumplen)
+- Umbrales de decisión:
+  · score ≥ 80  → acceptable=true,  must_regenerate=false
+  · 60 ≤ score < 80 → acceptable=true, must_regenerate=false, pero añadir warnings_for_teacher
+  · score < 60  → acceptable=false, must_regenerate=true
+- Un ítem crítico fallido (C1–C4) sobreescribe el score: acceptable=false, must_regenerate=true
+
+CRITERIOS DE ACEPTABILIDAD (resumen):
+✔ ACEPTABLE si: score ≥ 60 Y ningún ítem crítico fallido
+✗ NO ACEPTABLE si: score < 60 O cualquier ítem crítico fallido
 
 ═══════════════════════════════════════════════════════════════
 
@@ -89,8 +110,18 @@ Se te proporciona:
 
 Evalúa la rúbrica contra los criterios normativos anteriores y la pertinencia al perfil.
 
-Si "acceptable" es false, "suggestions" DEBE tener al menos 2 sugerencias concretas y accionables \
-que el Generador de Rúbrica pueda implementar directamente."""
+INSTRUCCIONES DE OUTPUT:
+- acceptable: true si score ≥ 60 y ningún ítem crítico fallido; false en caso contrario
+- must_regenerate: true si score < 60 o critical_issues no está vacío
+- score: entero 0–100 según sistema de puntuación definido
+- critique: descripción general de los problemas encontrados
+- suggestions: mínimo 2 sugerencias concretas y accionables cuando acceptable=false \
+  (nunca genéricas como "mejorar el lenguaje" — indicar QUÉ cambiar y CÓMO)
+- critical_issues: lista de códigos de ítems críticos fallidos (C1, C2, C3, C4) o lista vacía
+- warnings_for_teacher: advertencias no bloqueantes para el docente (ej. ítems Q parcialmente cumplidos, \
+  recomendaciones de aplicación) — puede estar vacía si no hay advertencias
+- regeneration_instructions: instrucciones específicas para el GeneradorRubrica si must_regenerate=true; \
+  string vacío si must_regenerate=false"""
 
 def make_critico_agent() -> LlmAgent:
     return LlmAgent(
@@ -102,7 +133,7 @@ def make_critico_agent() -> LlmAgent:
         include_contents="none",
         description="Evalúa la rúbrica contra el Decreto 83/2015 y el perfil PACI. Responde en JSON.",
         generate_content_config=genai_types.GenerateContentConfig(
-            temperature=0.1,
+            temperature=0.0,
             top_p=0.80,
             top_k=20,
             max_output_tokens=2048,

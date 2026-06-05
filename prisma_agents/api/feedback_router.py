@@ -4,8 +4,9 @@ import uuid
 from datetime import datetime, timezone
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from api.auth import get_current_user
 from api.schemas import ApprovalFeedbackRequest, FeedbackResponse
 
 logger = logging.getLogger(__name__)
@@ -94,7 +95,10 @@ def register_teacher_approval(session_id: str, approved: bool, comment: str | No
         "de PRISMA, que ya está registrado como `session_id` en la traza de Langfuse."
     ),
 )
-async def post_teacher_approval(body: ApprovalFeedbackRequest) -> FeedbackResponse:
+async def post_teacher_approval(
+    body: ApprovalFeedbackRequest,
+    _user: dict = Depends(get_current_user),
+) -> FeedbackResponse:
     try:
         register_teacher_approval(
             session_id=body.session_id,

@@ -142,9 +142,10 @@ def test_internal_run_missing_token():
 
 
 def test_internal_run_session_not_found_in_dynamo():
-    with patch("api.chat_router.INTERNAL_TOKEN", ""), \
+    with patch("api.chat_router.INTERNAL_TOKEN", "test-secret"), \
          patch("api.dynamo_store.get_session", return_value=None):
-        res = client.post("/chat/internal/run/sess-missing")
+        res = client.post("/chat/internal/run/sess-missing",
+                          headers={"X-Internal-Token": "test-secret"})
     assert res.status_code == 404
 
 
@@ -161,10 +162,11 @@ def test_internal_run_starts_workflow():
     async def fake_workflow(*args, **kwargs):
         pass
 
-    with patch("api.chat_router.INTERNAL_TOKEN", ""), \
+    with patch("api.chat_router.INTERNAL_TOKEN", "test-secret"), \
          patch("api.dynamo_store.get_session", return_value=dynamo_item), \
          patch("api.chat_router.run_workflow_for_api", side_effect=fake_workflow):
-        res = client.post(f"/chat/internal/run/{sid}")
+        res = client.post(f"/chat/internal/run/{sid}",
+                          headers={"X-Internal-Token": "test-secret"})
 
     assert res.status_code == 200
     assert res.json()["started"] is True

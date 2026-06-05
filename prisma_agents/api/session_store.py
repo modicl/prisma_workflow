@@ -18,6 +18,7 @@ class SessionData:
     workflow_status: Optional[str] = None  # "success" | "degraded" | "hitl_rejected" | "error" | "cancelled"
     cancelled: bool = False
     task: Optional[asyncio.Task] = field(default=None, repr=False, compare=False)
+    owner_id: Optional[str] = None  # sub del usuario Supabase que creó la sesión
 
 
 HitlCallback = Callable[[dict, int, int], Awaitable[tuple[bool, str, int]]]
