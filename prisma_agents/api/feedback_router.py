@@ -13,7 +13,11 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/feedback", tags=["Feedback"])
 
-_LANGFUSE_HOST = os.environ.get("LANGFUSE_HOST", "https://us.cloud.langfuse.com")
+_LANGFUSE_HOST = (
+    os.environ.get("LANGFUSE_BASE_URL")
+    or os.environ.get("LANGFUSE_HOST")
+    or "https://us.cloud.langfuse.com"
+)
 
 
 def _get_langfuse_credentials() -> tuple[str, str]:
@@ -106,9 +110,10 @@ async def post_teacher_approval(
             comment=body.comment,
         )
     except RuntimeError as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
+        logger.warning("Feedback no registrado en Langfuse (sesión sin traza): %s", exc)
+        return FeedbackResponse(success=False)
     except Exception as exc:
         logger.exception("Error al registrar score en Langfuse: %s", exc)
-        raise HTTPException(status_code=502, detail="No se pudo registrar el feedback en Langfuse")
+        return FeedbackResponse(success=False)
 
     return FeedbackResponse(success=True)

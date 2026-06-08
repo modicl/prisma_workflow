@@ -103,6 +103,7 @@ async def run_workflow(paci_path: str, material_path: str, prompt: str = "", use
     session = await session_service.create_session(
         app_name=APP_NAME,
         user_id=effective_user_id,
+        session_id=api_session_id if api_session_id else None,
         state={
             "paci_document": paci_text,
             "material_document": material_text,
