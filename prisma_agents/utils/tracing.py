@@ -34,14 +34,22 @@ def setup_tracing() -> bool:
         from openinference.instrumentation.google_adk import GoogleADKInstrumentor
         from langfuse import get_client
 
-        GoogleADKInstrumentor().instrument()
+        # get_client() must run first — it registers the global OTEL tracer provider
+        # that GoogleADKInstrumentor will attach to.
         client = get_client()
-        if client.auth_check():
-            logger.info("Langfuse tracing active — traces will appear at %s", _langfuse_host())
-        else:
-            logger.warning("Langfuse auth check failed — verify LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY.")
-
+        GoogleADKInstrumentor().instrument()
         _instrumented = True
+
+        try:
+            if client.auth_check():
+                logger.info("Langfuse tracing active — traces will appear at %s", _langfuse_host())
+            else:
+                logger.warning("Langfuse auth check failed — verify LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY.")
+        except Exception as auth_exc:
+            logger.warning(
+                "Langfuse auth check failed (tracing may still work): %s", auth_exc
+            )
+
         return True
     except ImportError as exc:
         logger.warning("Langfuse tracing unavailable (missing dependency): %s", exc)
@@ -53,7 +61,7 @@ def setup_tracing() -> bool:
 
 def _langfuse_host() -> str:
     return (
-        os.environ.get("LANGFUSE_HOST")
-        or os.environ.get("LANGFUSE_BASE_URL")
+        os.environ.get("LANGFUSE_BASE_URL")
+        or os.environ.get("LANGFUSE_HOST")
         or "https://cloud.langfuse.com"
     )

@@ -60,16 +60,14 @@ def _safe_ext(filename: str | None, default: str) -> str:
 
 @router.post(
     "/start",
-    tags=["Dev"],
-    summary="[Solo dev] Registrar sesión y subir documentos",
+    tags=["Chat"],
+    summary="Registrar sesión y subir documentos",
     description=(
-        "> ⚠️ **Endpoint de desarrollo local únicamente.** En producción esta responsabilidad "
-        "recae en el microservicio `prisma-ms-docs` (NestJS), que sube los archivos a S3 y "
-        "crea la sesión en DynamoDB. Este endpoint no debe ser llamado en producción.\n\n"
-        "Sube el PACI y el material base, crea la sesión en DynamoDB y simula el rol de "
-        "`prisma-ms-docs` para pruebas locales sin levantar el stack completo.\n\n"
-        "**Flujo local (dev):** los archivos se guardan en disco y el workflow se lanza "
-        "como BackgroundTask directamente, simulando el disparo de la Lambda."
+        "Sube el PACI y el material base e inicia el workflow de generación de rúbrica.\n\n"
+        "**Modo producción (S3_BUCKET configurado):** los archivos se suben a S3, se crea "
+        "la sesión en DynamoDB y la Lambda `prisma-trigger` dispara `/internal/run`.\n\n"
+        "**Modo dev local (S3_BUCKET vacío):** los archivos se guardan en disco y el "
+        "workflow se lanza como BackgroundTask directamente."
     ),
     response_model=StartChatResponse,
     status_code=201,
