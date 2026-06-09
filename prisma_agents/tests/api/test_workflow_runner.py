@@ -290,8 +290,8 @@ class TestRunWorkflowForApi:
         captured = {}
 
         async def fake_run_workflow(**kwargs):
-            while sid not in HITL_CALLBACKS:
-                await asyncio.sleep(0)
+            # run_workflow_for_api registra la callback antes de invocar run_workflow,
+            # así que ya está disponible aquí (no hace falta esperar por polling).
             callback = HITL_CALLBACKS[sid]
             cb_task = asyncio.create_task(
                 callback({"perfil_paci": "NEE", "planificacion_adaptada": "Plan"}, 1, 6)
@@ -300,7 +300,7 @@ class TestRunWorkflowForApi:
             await asyncio.sleep(0)
             # Cuerpo sin agent_to_retry (como lo envía el front ahora).
             await sd.hitl_response_queue.put({"approved": False, "reason": "Falta apoyo visual"})
-            approved, reason, agent = await cb_task
+            approved, _, agent = await cb_task
             captured["approved"] = approved
             captured["agent"] = agent
             return {"status": "hitl_rejected", "docx_path": ""}
