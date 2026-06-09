@@ -112,7 +112,10 @@ async def run_workflow_for_api(
 
         approved = response.get("approved", False)
         reason = response.get("reason") or ""
-        agent_to_retry = int(response.get("agent_to_retry") or 0)
+        # El front ya no envía agent_to_retry. Un rechazo no-final siempre reintenta el
+        # Agente 2 (Adaptador), que es lo que revisa el checkpoint. El caso de intentos
+        # agotados se maneja aparte (más abajo) retornando el sentinel 0.
+        agent_to_retry = int(response.get("agent_to_retry") or 2)
 
         # Si es el último intento y el docente rechaza, señalizamos directamente
         # sin depender de que ADK persista ctx.session.state en el return temprano.
