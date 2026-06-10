@@ -26,7 +26,7 @@ class SessionStateResponse(BaseModel):
     )
     workflow_status: Optional[str] = Field(
         None,
-        description="Resultado final del flujo: success | degraded | hitl_rejected | error | cancelled",
+        description="Resultado final del flujo: success | degraded | hitl_rejected | compliance_blocked | error | cancelled",
     )
     warnings: list[str] = Field(
         default_factory=list,

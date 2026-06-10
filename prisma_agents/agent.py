@@ -307,12 +307,8 @@ class PaciWorkflowAgent(BaseAgent):
             ctx.session.state["status"] = "validation_failed"
             ctx.session.state["validation_code"] = compliance.code
             ctx.session.state["validation_reason"] = compliance.reason
-            _push_sse_event(ctx.session.state, {
-                "type": "error",
-                "message": compliance.reason,
-                "workflow_status": "compliance_blocked",
-                "code": compliance.code,
-            })
+            # El evento SSE terminal lo emite _finalize_result (camino API), de forma
+            # consistente con el gate de rúbrica. No duplicar aquí.
             return
 
         # ── Book Repository: materiales de referencia del establecimiento ────

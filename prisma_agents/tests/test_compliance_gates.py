@@ -130,3 +130,25 @@ def test_critic_regenerate_fallback_a_critique():
     assert d.action == "regenerate"
     assert "Faltan criterios." in d.regeneration_instructions
     assert "Añadir criterio X" in d.regeneration_instructions
+
+
+def test_critic_fallback_de_json_malformado_va_a_regenerate():
+    # Contrato cruzado: el dict que produce _parse_critic_json ante un JSON inválido
+    # debe ser interpretado como 'regenerate' con instrucción no vacía.
+    from agent import _parse_critic_json
+
+    fallback = _parse_critic_json("esto no es json")
+    d = interpret_critic_decision(fallback)
+    assert d.action == "regenerate"
+    assert d.regeneration_instructions.strip() != ""
+
+
+def test_critic_regenerate_nunca_vacio():
+    # Crítico degenerado: rechaza sin dar ninguna pista → debe usarse el default.
+    d = interpret_critic_decision({
+        "acceptable": False, "score": 40, "critical_issues": [],
+        "warnings_for_teacher": [], "regeneration_instructions": "",
+        "critique": "", "suggestions": [],
+    })
+    assert d.action == "regenerate"
+    assert d.regeneration_instructions.strip() != ""

@@ -123,6 +123,7 @@ def _finalize_result(
             "type": "error",
             "message": session_data.error,
             "workflow_status": "compliance_blocked",
+            "code": results.get("validation_code", ""),
         })
         _push_message(session_data, f"❌ {session_data.error}", role="error")
         sync_to_dynamo(session_id, session_data)

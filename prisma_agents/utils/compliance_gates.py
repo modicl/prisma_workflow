@@ -122,6 +122,10 @@ def interpret_critic_decision(evaluacion: dict) -> CriticDecision:
         suggestions = evaluacion.get("suggestions") or []
         sug_text = "\n".join(f"- {s}" for s in suggestions)
         instructions = f"{critique}\n{sug_text}".strip()
+    # Red de seguridad: nunca devolver feedback de regeneración vacío (flujo de alta
+    # criticidad — un prompt sin contenido degradaría la siguiente iteración).
+    if not instructions:
+        instructions = "Sin retroalimentación específica del evaluador. Revise coherencia normativa y los 4 niveles de desempeño."
 
     return CriticDecision(
         "regenerate", score=score, warnings=warnings,

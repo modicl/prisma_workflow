@@ -168,6 +168,7 @@ async def run_workflow(paci_path: str, material_path: str, prompt: str = "", use
         "rubrica_final": state.get("rubrica", ""),
         "docx_path": None,
         "validation_reason": state.get("validation_reason", ""),
+        "validation_code": state.get("validation_code", ""),
         "warnings": state.get("warnings", []),
     }
 
