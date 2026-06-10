@@ -109,11 +109,28 @@ def _finalize_result(
 ) -> None:
     """Aplica el estado terminal de la sesión según el resultado del workflow."""
     # hitl_was_rejected es la fuente de verdad: no depende de que ADK persista el state.
-    agent_status = "hitl_rejected" if hitl_was_rejected[0] else results.get("status", "success")
+    raw_status = results.get("status", "success")
+    agent_status = "hitl_rejected" if hitl_was_rejected[0] else raw_status
     session_data.result = results
+
+    if agent_status in ("validation_failed", "compliance_blocked"):
+        session_data.phase = "error"
+        session_data.workflow_status = "compliance_blocked"
+        session_data.error = results.get("validation_reason") or (
+            "El documento no cumple la normativa requerida y el proceso fue detenido."
+        )
+        session_data.event_queue.put_nowait({
+            "type": "error",
+            "message": session_data.error,
+            "workflow_status": "compliance_blocked",
+        })
+        _push_message(session_data, f"❌ {session_data.error}", role="error")
+        sync_to_dynamo(session_id, session_data)
+        return
 
     if agent_status in ("success", "fail"):
         session_data.docx_path = results.get("docx_path")
+        session_data.warnings = results.get("warnings", []) or []
         session_data.phase = "completed"
         wf_status = "success" if agent_status == "success" else "degraded"
         session_data.workflow_status = wf_status
@@ -123,7 +140,11 @@ def _finalize_result(
             else "⚠️ Proceso completado. La rúbrica fue generada como mejor esfuerzo y no superó todos los criterios de calidad. Revise el documento antes de usarlo."
         )
         _push_message(session_data, completion_msg, role="agent")
-        session_data.event_queue.put_nowait({"type": "completed", "workflow_status": wf_status})
+        session_data.event_queue.put_nowait({
+            "type": "completed",
+            "workflow_status": wf_status,
+            "warnings": session_data.warnings,
+        })
 
         # Upload DOCX to S3 and record the key in DynamoDB
         docx_s3_key = ""

@@ -8,6 +8,7 @@ import pytest
 from unittest.mock import patch, MagicMock
 from api.session_store import SESSIONS, HITL_CALLBACKS, SessionData
 from api import workflow_runner
+from api.workflow_runner import _finalize_result
 
 
 async def _run_with_patches(sid, sd, fake_run_workflow):
@@ -420,3 +421,31 @@ class TestRunWorkflowForApi:
 
         self._run(_go())
         assert len(download_calls) == 2
+
+
+def test_finalize_validation_failed():
+    sd = SessionData()
+    results = {"status": "validation_failed",
+               "validation_reason": "Informe vencido (Decreto 170/2010)",
+               "warnings": []}
+    _finalize_result("sid", sd, results, hitl_was_rejected=[False])
+    assert sd.phase == "error"
+    assert sd.workflow_status == "compliance_blocked"
+    assert "170/2010" in sd.error
+    ev = sd.event_queue.get_nowait()
+    assert ev["type"] == "error"
+    assert ev["workflow_status"] == "compliance_blocked"
+
+
+def test_finalize_success_propaga_warnings():
+    sd = SessionData()
+    results = {"status": "success", "docx_path": None,
+               "warnings": ["Revisar condiciones de aplicación"]}
+    _finalize_result("sid", sd, results, hitl_was_rejected=[False])
+    assert sd.phase == "completed"
+    assert sd.warnings == ["Revisar condiciones de aplicación"]
+    events = []
+    while not sd.event_queue.empty():
+        events.append(sd.event_queue.get_nowait())
+    completed = [e for e in events if e["type"] == "completed"][0]
+    assert completed["warnings"] == ["Revisar condiciones de aplicación"]
