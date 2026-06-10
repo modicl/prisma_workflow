@@ -9,6 +9,7 @@ CURSO: 5° Básico
 DIAGNOSTICO: TEA
 FECHA_INFORME: 2025-09-01
 PUEDE_CONTINUAR: SI
+MOTIVO: N/A
 ---FIN_METADATOS---"""
 
 
@@ -18,9 +19,11 @@ def test_extrae_campos_nuevos():
     assert meta["diagnostico"] == "TEA"
     assert meta["fecha_informe"] == "2025-09-01"
     assert meta["puede_continuar"] == "SI"
+    assert meta["motivo"] == "N/A"
 
 
 def test_campos_ausentes_default_vacio():
     meta = _extract_metadatos("sin bloque de metadatos")
     assert meta["fecha_informe"] == ""
     assert meta["puede_continuar"] == ""
+    assert meta["motivo"] == ""

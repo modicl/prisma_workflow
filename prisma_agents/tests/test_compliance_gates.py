@@ -78,6 +78,20 @@ def test_precedencia_puede_continuar_gana():
     assert r.code == "paci_incompleto"
 
 
+def test_motivo_se_incluye_en_el_mensaje():
+    r = evaluate_paci_compliance(
+        _meta(puede_continuar="NO", motivo="diagnóstico, período de vigencia"), TODAY
+    )
+    assert r.blocked is True
+    assert "Detalle:" in r.reason
+    assert "período de vigencia" in r.reason
+
+
+def test_motivo_na_no_agrega_detalle():
+    r = evaluate_paci_compliance(_meta(puede_continuar="NO", motivo="N/A"), TODAY)
+    assert "Detalle:" not in r.reason
+
+
 from utils.compliance_gates import interpret_critic_decision
 
 

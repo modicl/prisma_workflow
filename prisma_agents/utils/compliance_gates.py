@@ -48,13 +48,17 @@ def evaluate_paci_compliance(metadatos: dict, today: date) -> ComplianceResult:
     """Evalúa los gates de PACI en orden de severidad. Primer fallo bloquea."""
     puede = (metadatos.get("puede_continuar") or "").strip().upper()
     if puede == "NO":
+        motivo = (metadatos.get("motivo") or "").strip()
+        detalle = ""
+        if motivo and motivo.upper() not in ("N/A", "NA", "NO_PROCESADO", ""):
+            detalle = f" Detalle: {motivo}."
         return ComplianceResult(
             True,
             "paci_incompleto",
             "El PACI no es procesable: contiene datos personales directos "
             "(nombre o RUT) o le faltan campos obligatorios (diagnóstico, "
-            "vigencia, estrategias). Revise el documento antes de reintentar. "
-            "(Decreto 83/2015 — Ley 21.719)",
+            "vigencia, estrategias)." + detalle + " Revise el documento antes "
+            "de reintentar. (Decreto 83/2015 — Ley 21.719)",
             "83/2015",
         )
 

@@ -24,7 +24,7 @@ from datetime import date
 from google.adk.agents import BaseAgent
 from google.adk.agents.llm_agent import LlmAgent
 from google.adk.agents.invocation_context import InvocationContext
-from google.adk.events import Event
+from google.adk.events import Event, EventActions
 from typing import AsyncGenerator
 from google import genai
 from google.genai import types as genai_types
@@ -105,12 +105,14 @@ def _extract_metadatos(perfil_paci: str) -> dict[str, str]:
     diag_match = re.search(r'DIAGNOSTICO:\s*(.+)', block)
     fecha_match = re.search(r'FECHA_INFORME:\s*(.+)', block)
     puede_match = re.search(r'PUEDE_CONTINUAR:\s*(.+)', block)
+    motivo_match = re.search(r'MOTIVO:\s*(.+)', block)
     return {
         "ramo": ramo_match.group(1).strip() if ramo_match else "",
         "curso": curso_match.group(1).strip() if curso_match else "",
         "diagnostico": diag_match.group(1).strip() if diag_match else "",
         "fecha_informe": fecha_match.group(1).strip() if fecha_match else "",
         "puede_continuar": puede_match.group(1).strip() if puede_match else "",
+        "motivo": motivo_match.group(1).strip() if motivo_match else "",
     }
 
 
@@ -288,6 +290,17 @@ class PaciWorkflowAgent(BaseAgent):
             critico_agent=_critico,
         )
 
+    def _commit_state(self, ctx: InvocationContext, **delta) -> Event:
+        """Escribe estado terminal y lo persiste vía state_delta.
+
+        La mutación directa de ctx.session.state NO sobrevive al get_session()
+        que lee run.py al finalizar; ADK solo persiste lo que viaja en el
+        state_delta de un Event. Por eso los valores terminales que run.py
+        consume (status, warnings, validation_*) deben emitirse así.
+        """
+        ctx.session.state.update(delta)
+        return Event(author=self.name, actions=EventActions(state_delta=delta))
+
     async def _run_async_impl(
         self, ctx: InvocationContext
     ) -> AsyncGenerator[Event, None]:
@@ -304,11 +317,14 @@ class PaciWorkflowAgent(BaseAgent):
         compliance = evaluate_paci_compliance(meta, date.today())
         if compliance.blocked:
             print(f"\n[GATE] PACI bloqueado: {compliance.code} — {compliance.reason}\n")
-            ctx.session.state["status"] = "validation_failed"
-            ctx.session.state["validation_code"] = compliance.code
-            ctx.session.state["validation_reason"] = compliance.reason
-            # El evento SSE terminal lo emite _finalize_result (camino API), de forma
-            # consistente con el gate de rúbrica. No duplicar aquí.
+            # El evento SSE terminal lo emite _finalize_result (camino API). Aquí solo
+            # persistimos el estado terminal vía state_delta para que run.py lo lea.
+            yield self._commit_state(
+                ctx,
+                status="validation_failed",
+                validation_code=compliance.code,
+                validation_reason=compliance.reason,
+            )
             return
 
         # ── Book Repository: materiales de referencia del establecimiento ────
@@ -421,20 +437,22 @@ class PaciWorkflowAgent(BaseAgent):
             if decision.action == "block_critical":
                 codigos = ", ".join(decision.critical_issues)
                 print(f"\n[GATE] Rúbrica con ítem crítico ({codigos}) — deteniendo sin reintentar.\n")
-                ctx.session.state["status"] = "compliance_blocked"
-                ctx.session.state["validation_code"] = "rubrica_critica"
-                ctx.session.state["validation_reason"] = (
-                    "La rúbrica generada incumple una restricción normativa crítica "
-                    f"({codigos}: datos personales, diagnóstico expuesto, lenguaje "
-                    "estigmatizante o exención). El proceso se detuvo por seguridad. "
-                    "(Decreto 67/2018 — Decreto 170/2010)"
+                yield self._commit_state(
+                    ctx,
+                    status="compliance_blocked",
+                    validation_code="rubrica_critica",
+                    validation_reason=(
+                        "La rúbrica generada incumple una restricción normativa crítica "
+                        f"({codigos}: datos personales, diagnóstico expuesto, lenguaje "
+                        "estigmatizante o exención). El proceso se detuvo por seguridad. "
+                        "(Decreto 67/2018 — Decreto 170/2010)"
+                    ),
                 )
                 break
 
             if decision.action == "accept":
                 print(f"\n✓ Rúbrica aprobada en iteración {iteration} (score {decision.score}).\n")
-                ctx.session.state["status"] = "success"
-                ctx.session.state["warnings"] = decision.warnings
+                yield self._commit_state(ctx, status="success", warnings=decision.warnings)
                 break
 
             # decision.action == "regenerate"
@@ -446,7 +464,7 @@ class PaciWorkflowAgent(BaseAgent):
                 print("\n✗ Rúbrica rechazada. Reintentando con retroalimentación...\n")
             else:
                 print("\n⚠ Máximo de iteraciones alcanzado. Se entrega la última versión generada.\n")
-                ctx.session.state["status"] = "fail"
+                yield self._commit_state(ctx, status="fail")
 
 
 def _parse_critic_json(raw) -> dict:
