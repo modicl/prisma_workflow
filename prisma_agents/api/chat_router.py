@@ -273,6 +273,7 @@ async def get_state(session_id: str, _user: dict = Depends(get_current_user)):
             "hitl_data":       item["hitl_data"],
             "error":           item["error"],
             "workflow_status": item.get("workflow_status"),
+            "warnings":        item.get("warnings", []),
         }
     # Local dev fallback
     if session_id not in SESSIONS:
@@ -285,6 +286,7 @@ async def get_state(session_id: str, _user: dict = Depends(get_current_user)):
         "hitl_data":       sd.hitl_data,
         "error":           sd.error,
         "workflow_status": sd.workflow_status,
+        "warnings":        sd.warnings,
     }
 
 
