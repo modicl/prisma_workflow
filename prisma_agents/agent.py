@@ -90,7 +90,7 @@ def _extract_subject_grade(perfil_paci: str) -> tuple[str, str]:
 
 
 def _extract_metadatos(perfil_paci: str) -> dict[str, str]:
-    """Extrae RAMO, CURSO y DIAGNOSTICO del bloque ---METADATOS--- generado por AnalizadorPACI."""
+    """Extrae RAMO, CURSO, DIAGNOSTICO, FECHA_INFORME y PUEDE_CONTINUAR del bloque ---METADATOS---."""
     block_match = re.search(
         r'---METADATOS---(.*?)---FIN_METADATOS---', perfil_paci, re.DOTALL
     )
@@ -98,10 +98,14 @@ def _extract_metadatos(perfil_paci: str) -> dict[str, str]:
     ramo_match = re.search(r'RAMO:\s*(.+)', block)
     curso_match = re.search(r'CURSO:\s*(.+)', block)
     diag_match = re.search(r'DIAGNOSTICO:\s*(.+)', block)
+    fecha_match = re.search(r'FECHA_INFORME:\s*(.+)', block)
+    puede_match = re.search(r'PUEDE_CONTINUAR:\s*(.+)', block)
     return {
         "ramo": ramo_match.group(1).strip() if ramo_match else "",
         "curso": curso_match.group(1).strip() if curso_match else "",
         "diagnostico": diag_match.group(1).strip() if diag_match else "",
+        "fecha_informe": fecha_match.group(1).strip() if fecha_match else "",
+        "puede_continuar": puede_match.group(1).strip() if puede_match else "",
     }
 
 
