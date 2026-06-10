@@ -113,6 +113,7 @@ def _extract_metadatos(perfil_paci: str) -> dict[str, str]:
         "fecha_informe": fecha_match.group(1).strip() if fecha_match else "",
         "puede_continuar": puede_match.group(1).strip() if puede_match else "",
         "motivo": motivo_match.group(1).strip() if motivo_match else "",
+        "pii_detectado": "---PII_DETECTADO---" in perfil_paci,
     }
 
 

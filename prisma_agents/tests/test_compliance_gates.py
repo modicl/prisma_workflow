@@ -83,13 +83,25 @@ def test_motivo_se_incluye_en_el_mensaje():
         _meta(puede_continuar="NO", motivo="diagnóstico, período de vigencia"), TODAY
     )
     assert r.blocked is True
-    assert "Detalle:" in r.reason
+    assert r.code == "paci_incompleto"
     assert "período de vigencia" in r.reason
 
 
-def test_motivo_na_no_agrega_detalle():
+def test_motivo_na_usa_mensaje_generico():
     r = evaluate_paci_compliance(_meta(puede_continuar="NO", motivo="N/A"), TODAY)
-    assert "Detalle:" not in r.reason
+    assert r.code == "paci_incompleto"
+    assert "faltan campos obligatorios" in r.reason
+
+
+def test_pii_detectado_bloquea_con_prioridad():
+    # PII tiene prioridad sobre cualquier otro fallo y devuelve su propio código/mensaje.
+    r = evaluate_paci_compliance(
+        _meta(pii_detectado=True, puede_continuar="NO", diagnostico="resfrío"), TODAY
+    )
+    assert r.blocked is True
+    assert r.code == "pii_detectado"
+    assert "21.719" in r.decreto
+    assert "código interno" in r.reason
 
 
 from utils.compliance_gates import interpret_critic_decision

@@ -45,20 +45,37 @@ def _parse_iso_date(raw: str) -> Optional[date]:
 
 
 def evaluate_paci_compliance(metadatos: dict, today: date) -> ComplianceResult:
-    """Evalúa los gates de PACI en orden de severidad. Primer fallo bloquea."""
+    """Evalúa los gates de PACI en orden de severidad. Primer fallo bloquea.
+
+    Cada causa de bloqueo entrega un mensaje propio y accionable (no un texto
+    genérico): el front muestra `reason` directamente al docente.
+    """
+    # 1. Datos personales directos (Ley 21.719) — máxima prioridad
+    if metadatos.get("pii_detectado"):
+        return ComplianceResult(
+            True,
+            "pii_detectado",
+            "El documento contiene datos personales directos del estudiante "
+            "(nombre, RUT u otro identificador). Por protección de datos "
+            "(Ley 21.719) no puede procesarse: reemplace esos datos por un "
+            "código interno del estudiante y vuelva a subir el documento.",
+            "Ley 21.719",
+        )
+
+    # 2. PACI incompleto o no procesable (Decreto 83/2015)
     puede = (metadatos.get("puede_continuar") or "").strip().upper()
     if puede == "NO":
         motivo = (metadatos.get("motivo") or "").strip()
-        detalle = ""
-        if motivo and motivo.upper() not in ("N/A", "NA", "NO_PROCESADO", ""):
-            detalle = f" Detalle: {motivo}."
+        if motivo and motivo.upper() not in ("N/A", "NA", "NO_PROCESADO"):
+            cuerpo = f"El PACI no puede procesarse — {motivo}."
+        else:
+            cuerpo = ("El PACI está incompleto: faltan campos obligatorios "
+                      "(diagnóstico, período de vigencia o estrategias de aula).")
         return ComplianceResult(
             True,
             "paci_incompleto",
-            "El PACI no es procesable: contiene datos personales directos "
-            "(nombre o RUT) o le faltan campos obligatorios (diagnóstico, "
-            "vigencia, estrategias)." + detalle + " Revise el documento antes "
-            "de reintentar. (Decreto 83/2015 — Ley 21.719)",
+            f"{cuerpo} Complete o corrija el documento según el Decreto 83/2015 "
+            "y vuelva a intentar.",
             "83/2015",
         )
 
