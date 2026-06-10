@@ -19,6 +19,7 @@ Flujo:
 import asyncio
 import json
 import re
+from datetime import date
 
 from google.adk.agents import BaseAgent
 from google.adk.agents.llm_agent import LlmAgent
@@ -34,6 +35,10 @@ from agents.adaptador import make_adaptador_agent
 from agents.generador_rubrica import make_generador_rubrica_agent
 from agents.critico import make_critico_agent
 from utils.curriculum_catalog import normalize_subject, normalize_grade
+from utils.compliance_gates import (
+    evaluate_paci_compliance,
+    interpret_critic_decision,
+)
 from tools.book_repository import get_reference_materials_async
 
 _genai_client: genai.Client | None = None
@@ -292,6 +297,22 @@ class PaciWorkflowAgent(BaseAgent):
         async for event in _run_with_timeout(self.analizador_paci_agent, ctx, "Agente 1"):
             yield event
         if ctx.session.state.get("status") == "timeout":
+            return
+
+        # ── Gate de compliance del PACI (Decretos 170/83) ────────────────────
+        meta = _extract_metadatos(ctx.session.state.get("perfil_paci", ""))
+        compliance = evaluate_paci_compliance(meta, date.today())
+        if compliance.blocked:
+            print(f"\n[GATE] PACI bloqueado: {compliance.code} — {compliance.reason}\n")
+            ctx.session.state["status"] = "validation_failed"
+            ctx.session.state["validation_code"] = compliance.code
+            ctx.session.state["validation_reason"] = compliance.reason
+            _push_sse_event(ctx.session.state, {
+                "type": "error",
+                "message": compliance.reason,
+                "workflow_status": "compliance_blocked",
+                "code": compliance.code,
+            })
             return
 
         # ── Book Repository: materiales de referencia del establecimiento ────
