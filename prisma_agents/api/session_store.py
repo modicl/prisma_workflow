@@ -16,6 +16,7 @@ class SessionData:
     docx_path: Optional[str] = None
     error: Optional[str] = None
     workflow_status: Optional[str] = None  # "success" | "degraded" | "hitl_rejected" | "error" | "cancelled"
+    warnings: list = field(default_factory=list)  # advertencias no bloqueantes del Crítico
     cancelled: bool = False
     task: Optional[asyncio.Task] = field(default=None, repr=False, compare=False)
     owner_id: Optional[str] = None  # sub del usuario Supabase que creó la sesión
@@ -36,5 +37,6 @@ def sync_to_dynamo(session_id: str, session_data: SessionData, **extra) -> None:
         hitl_data=session_data.hitl_data,
         error=session_data.error,
         workflow_status=session_data.workflow_status,
+        warnings=session_data.warnings,
         **extra,
     )

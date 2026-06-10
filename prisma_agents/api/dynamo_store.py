@@ -22,6 +22,7 @@ _FIELD_TYPES = {
     "error": "S",
     "docx_s3_key": "S",
     "workflow_status": "S",
+    "warnings": "S",
 }
 _TRANSFORMS = {
     "messages": json.dumps,
@@ -29,6 +30,7 @@ _TRANSFORMS = {
     "error": lambda v: v or "",
     "docx_s3_key": lambda v: v or "",
     "workflow_status": lambda v: v or "",
+    "warnings": json.dumps,
 }
 
 
@@ -59,6 +61,7 @@ def create_session(session_id: str, **fields) -> None:
                 "error":           {"S": ""},
                 "docx_s3_key":     {"S": ""},
                 "workflow_status": {"S": ""},
+                "warnings":        {"S": "[]"},
                 "paci_s3_key":     {"S": fields.get("paci_s3_key", "")},
                 "material_s3_key": {"S": fields.get("material_s3_key", "")},
                 "prompt":          {"S": fields.get("prompt", "")},
@@ -100,6 +103,7 @@ def get_session(session_id: str) -> Optional[dict]:
         "error":           item.get("error", {}).get("S") or None,
         "docx_s3_key":     item.get("docx_s3_key", {}).get("S") or None,
         "workflow_status": item.get("workflow_status", {}).get("S") or None,
+        "warnings":        json.loads(item.get("warnings", {}).get("S", "[]")),
         "paci_s3_key":     item.get("paci_s3_key", {}).get("S", ""),
         "material_s3_key": item.get("material_s3_key", {}).get("S", ""),
         "prompt":          item.get("prompt", {}).get("S", ""),
