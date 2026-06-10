@@ -76,3 +76,57 @@ def test_precedencia_puede_continuar_gana():
         _meta(puede_continuar="NO", diagnostico="resfrío"), TODAY
     )
     assert r.code == "paci_incompleto"
+
+
+from utils.compliance_gates import interpret_critic_decision
+
+
+def test_critic_block_critical():
+    d = interpret_critic_decision({
+        "acceptable": False, "must_regenerate": True, "score": 30,
+        "critical_issues": ["C1"], "warnings_for_teacher": [],
+        "regeneration_instructions": "x",
+    })
+    assert d.action == "block_critical"
+    assert d.critical_issues == ["C1"]
+
+
+def test_critic_accept_sin_warnings():
+    d = interpret_critic_decision({
+        "acceptable": True, "must_regenerate": False, "score": 88,
+        "critical_issues": [], "warnings_for_teacher": [],
+        "regeneration_instructions": "",
+    })
+    assert d.action == "accept"
+    assert d.warnings == []
+
+
+def test_critic_accept_con_warnings():
+    d = interpret_critic_decision({
+        "acceptable": True, "must_regenerate": False, "score": 70,
+        "critical_issues": [], "warnings_for_teacher": ["Revisar Q2"],
+        "regeneration_instructions": "",
+    })
+    assert d.action == "accept"
+    assert d.warnings == ["Revisar Q2"]
+
+
+def test_critic_regenerate_usa_instructions():
+    d = interpret_critic_decision({
+        "acceptable": False, "must_regenerate": True, "score": 40,
+        "critical_issues": [], "warnings_for_teacher": [],
+        "regeneration_instructions": "Agrega 4 niveles de desempeño.",
+    })
+    assert d.action == "regenerate"
+    assert "4 niveles" in d.regeneration_instructions
+
+
+def test_critic_regenerate_fallback_a_critique():
+    d = interpret_critic_decision({
+        "acceptable": False, "score": 40, "critical_issues": [],
+        "warnings_for_teacher": [], "regeneration_instructions": "",
+        "critique": "Faltan criterios.", "suggestions": ["Añadir criterio X"],
+    })
+    assert d.action == "regenerate"
+    assert "Faltan criterios." in d.regeneration_instructions
+    assert "Añadir criterio X" in d.regeneration_instructions

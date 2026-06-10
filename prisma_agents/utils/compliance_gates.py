@@ -90,3 +90,40 @@ def evaluate_paci_compliance(metadatos: dict, today: date) -> ComplianceResult:
         )
 
     return ComplianceResult(False)
+
+
+@dataclass
+class CriticDecision:
+    action: str                       # "accept" | "regenerate" | "block_critical"
+    score: int = 0
+    warnings: list = field(default_factory=list)
+    critical_issues: list = field(default_factory=list)
+    regeneration_instructions: str = ""
+
+
+def interpret_critic_decision(evaluacion: dict) -> CriticDecision:
+    """Traduce el JSON del AgenteCritico a una acción del orquestador."""
+    critical = evaluacion.get("critical_issues") or []
+    warnings = evaluacion.get("warnings_for_teacher") or []
+    score = int(evaluacion.get("score") or 0)
+
+    if critical:
+        return CriticDecision(
+            "block_critical", score=score, warnings=warnings,
+            critical_issues=critical,
+        )
+
+    if evaluacion.get("acceptable", False):
+        return CriticDecision("accept", score=score, warnings=warnings)
+
+    instructions = (evaluacion.get("regeneration_instructions") or "").strip()
+    if not instructions:
+        critique = evaluacion.get("critique", "")
+        suggestions = evaluacion.get("suggestions") or []
+        sug_text = "\n".join(f"- {s}" for s in suggestions)
+        instructions = f"{critique}\n{sug_text}".strip()
+
+    return CriticDecision(
+        "regenerate", score=score, warnings=warnings,
+        regeneration_instructions=instructions,
+    )
