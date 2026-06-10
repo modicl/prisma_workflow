@@ -420,25 +420,36 @@ class PaciWorkflowAgent(BaseAgent):
             evaluacion_raw = ctx.session.state.get("evaluacion_critica", "")
             print(f"\n[DEBUG] Respuesta cruda del Agente Crítico:\n{str(evaluacion_raw)[:500]}\n")
             evaluacion = _parse_critic_json(evaluacion_raw)
+            decision = interpret_critic_decision(evaluacion)
 
-            if evaluacion.get("acceptable", False):
-                print(f"\n✓ Rúbrica aprobada en iteración {iteration}.\n")
-                ctx.session.state["status"] = "success"
+            if decision.action == "block_critical":
+                codigos = ", ".join(decision.critical_issues)
+                print(f"\n[GATE] Rúbrica con ítem crítico ({codigos}) — deteniendo sin reintentar.\n")
+                ctx.session.state["status"] = "compliance_blocked"
+                ctx.session.state["validation_code"] = "rubrica_critica"
+                ctx.session.state["validation_reason"] = (
+                    "La rúbrica generada incumple una restricción normativa crítica "
+                    f"({codigos}: datos personales, diagnóstico expuesto, lenguaje "
+                    "estigmatizante o exención). El proceso se detuvo por seguridad. "
+                    "(Decreto 67/2018 — Decreto 170/2010)"
+                )
                 break
 
+            if decision.action == "accept":
+                print(f"\n✓ Rúbrica aprobada en iteración {iteration} (score {decision.score}).\n")
+                ctx.session.state["status"] = "success"
+                ctx.session.state["warnings"] = decision.warnings
+                break
+
+            # decision.action == "regenerate"
             if iteration < MAX_ITERATIONS:
-                critique = evaluacion.get("critique", "Sin descripción.")
-                suggestions = evaluacion.get("suggestions", [])
-                suggestions_text = "\n".join(f"- {s}" for s in suggestions)
                 ctx.session.state["critica_previa"] = (
-                    f"RETROALIMENTACIÓN EVALUADOR (iteración {iteration}):\n"
-                    f"{critique}\n\n"
-                    f"SUGERENCIAS A INCORPORAR:\n"
-                    f"{suggestions_text}"
+                    f"RETROALIMENTACIÓN EVALUADOR (iteración {iteration}, score {decision.score}):\n"
+                    f"{decision.regeneration_instructions}"
                 )
-                print(f"\n✗ Rúbrica rechazada. Reintentando con retroalimentación...\n")
+                print("\n✗ Rúbrica rechazada. Reintentando con retroalimentación...\n")
             else:
-                print(f"\n⚠ Máximo de iteraciones alcanzado. Se entrega la última versión generada.\n")
+                print("\n⚠ Máximo de iteraciones alcanzado. Se entrega la última versión generada.\n")
                 ctx.session.state["status"] = "fail"
 
 
@@ -451,8 +462,13 @@ def _parse_critic_json(raw) -> dict:
     except (json.JSONDecodeError, AttributeError):
         return {
             "acceptable": False,
+            "must_regenerate": True,
+            "score": 0,
             "critique": str(raw),
             "suggestions": ["El Agente Crítico no retornó JSON válido. Revisar la rúbrica manualmente."],
+            "critical_issues": [],
+            "warnings_for_teacher": [],
+            "regeneration_instructions": "",
         }
 
 
