@@ -279,6 +279,36 @@ class TestRunWorkflowForApi:
 
         self._run(_run_with_patches(sid, sd, fake_run_workflow))
 
+    def test_hitl_callback_rejection_without_agent_defaults_to_adaptador(self):
+        """El front ya no envía agent_to_retry: un rechazo no-final debe enrutar al Agente 2.
+
+        La aserción se hace fuera de fake_run_workflow porque run_workflow_for_api atrapa
+        cualquier excepción (incluido AssertionError) en su try/except.
+        """
+        sid = "test-hitl-cb-no-agent"
+        sd = _make_session(sid)
+        captured = {}
+
+        async def fake_run_workflow(**kwargs):
+            # run_workflow_for_api registra la callback antes de invocar run_workflow,
+            # así que ya está disponible aquí (no hace falta esperar por polling).
+            callback = HITL_CALLBACKS[sid]
+            cb_task = asyncio.create_task(
+                callback({"perfil_paci": "NEE", "planificacion_adaptada": "Plan"}, 1, 6)
+            )
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+            # Cuerpo sin agent_to_retry (como lo envía el front ahora).
+            await sd.hitl_response_queue.put({"approved": False, "reason": "Falta apoyo visual"})
+            approved, _, agent = await cb_task
+            captured["approved"] = approved
+            captured["agent"] = agent
+            return {"status": "hitl_rejected", "docx_path": ""}
+
+        self._run(_run_with_patches(sid, sd, fake_run_workflow))
+        assert captured["approved"] is False
+        assert captured["agent"] == 2  # Agente 2 (Adaptador) por defecto
+
     def test_s3_upload_of_docx_when_bucket_set(self, tmp_path):
         """Cubre lines 171-172: subida del DOCX a S3 cuando S3_BUCKET está configurado."""
         sid = "test-s3-upload-docx"
