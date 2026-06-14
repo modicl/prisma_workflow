@@ -167,6 +167,9 @@ async def run_workflow(paci_path: str, material_path: str, prompt: str = "", use
         "planificacion_adaptada": state.get("planificacion_adaptada", ""),
         "rubrica_final": state.get("rubrica", ""),
         "docx_path": None,
+        "validation_reason": state.get("validation_reason", ""),
+        "validation_code": state.get("validation_code", ""),
+        "warnings": state.get("warnings", []),
     }
 
     # Exportar a DOCX solo si hay rúbrica generada

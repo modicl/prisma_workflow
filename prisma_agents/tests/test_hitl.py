@@ -4,6 +4,8 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from datetime import date
+
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -151,7 +153,16 @@ class TestHitlLoop:
             "critica_previa": "",
             "hitl_feedback_a1": "",
             "hitl_feedback_a2": "",
-            "perfil_paci": "Diagnóstico: TDAH",
+            "perfil_paci": (
+                "Diagnóstico: TDAH\n\n"
+                "---METADATOS---\n"
+                "RAMO: Matemáticas\n"
+                "CURSO: 5° Básico\n"
+                "DIAGNOSTICO: TDAH\n"
+                f"FECHA_INFORME: {date.today().isoformat()}\n"
+                "PUEDE_CONTINUAR: SI\n"
+                "---FIN_METADATOS---"
+            ),
             "planificacion_adaptada": "Adecuación NO SIGNIFICATIVA",
             "rubrica": "rubrica generada",
             "evaluacion_critica": '{"acceptable": true, "critique": "", "suggestions": []}',

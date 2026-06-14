@@ -83,6 +83,7 @@ CURSO: NO_PROCESADO
 DIAGNOSTICO: NO_PROCESADO
 FECHA_INFORME: NO_PROCESADO
 PUEDE_CONTINUAR: NO
+MOTIVO: Datos personales directos detectados (sin reproducirlos)
 ---FIN_METADATOS---
 
 No incluyas ninguna sección de análisis si PII fue detectado.
@@ -130,7 +131,8 @@ Verifica la presencia de cada campo y marca el estado:
 - Período de vigencia o fecha de reevaluación: PRESENTE / AUSENTE
 - Fecha del informe clínico o psicopedagógico: PRESENTE / AUSENTE (extraer en METADATOS)
 
-Si 2 o más campos están AUSENTES, establece PUEDE_CONTINUAR: NO en el bloque METADATOS.
+Si 2 o más campos están AUSENTES, establece PUEDE_CONTINUAR: NO en el bloque METADATOS \
+y enumera en el campo MOTIVO exactamente cuáles campos faltan.
 
 Presenta el análisis usando exactamente estos encabezados. Sé específico y detallado, \
 ya que este perfil será utilizado por otros agentes para adaptar materiales y generar rúbricas.
@@ -150,6 +152,7 @@ CURSO: <nivel del estudiante, ej: 5° Básico>
 DIAGNOSTICO: <ID canónico del diagnóstico — usa EXACTAMENTE uno de la tabla de abajo>
 FECHA_INFORME: <fecha del informe clínico o psicopedagógico en formato YYYY-MM-DD, o "NO_ENCONTRADA" si no está presente>
 PUEDE_CONTINUAR: <SI si el PACI es procesable; NO si se detectó PII directo o 2+ campos obligatorios están ausentes>
+MOTIVO: <si PUEDE_CONTINUAR es NO, indica la causa concreta: "PII detectado" o la lista de campos obligatorios ausentes separados por coma (ej: "diagnóstico, período de vigencia"); si es SI, escribe "N/A">
 ---FIN_METADATOS---
 
 TABLA DE IDs CANÓNICOS — escribe el valor de DIAGNOSTICO usando exactamente uno de estos:

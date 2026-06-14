@@ -19,11 +19,12 @@ Flujo:
 import asyncio
 import json
 import re
+from datetime import date
 
 from google.adk.agents import BaseAgent
 from google.adk.agents.llm_agent import LlmAgent
 from google.adk.agents.invocation_context import InvocationContext
-from google.adk.events import Event
+from google.adk.events import Event, EventActions
 from typing import AsyncGenerator
 from google import genai
 from google.genai import types as genai_types
@@ -34,6 +35,10 @@ from agents.adaptador import make_adaptador_agent
 from agents.generador_rubrica import make_generador_rubrica_agent
 from agents.critico import make_critico_agent
 from utils.curriculum_catalog import normalize_subject, normalize_grade
+from utils.compliance_gates import (
+    evaluate_paci_compliance,
+    interpret_critic_decision,
+)
 from tools.book_repository import get_reference_materials_async
 
 _genai_client: genai.Client | None = None
@@ -90,7 +95,7 @@ def _extract_subject_grade(perfil_paci: str) -> tuple[str, str]:
 
 
 def _extract_metadatos(perfil_paci: str) -> dict[str, str]:
-    """Extrae RAMO, CURSO y DIAGNOSTICO del bloque ---METADATOS--- generado por AnalizadorPACI."""
+    """Extrae RAMO, CURSO, DIAGNOSTICO, FECHA_INFORME y PUEDE_CONTINUAR del bloque ---METADATOS---."""
     block_match = re.search(
         r'---METADATOS---(.*?)---FIN_METADATOS---', perfil_paci, re.DOTALL
     )
@@ -98,10 +103,17 @@ def _extract_metadatos(perfil_paci: str) -> dict[str, str]:
     ramo_match = re.search(r'RAMO:\s*(.+)', block)
     curso_match = re.search(r'CURSO:\s*(.+)', block)
     diag_match = re.search(r'DIAGNOSTICO:\s*(.+)', block)
+    fecha_match = re.search(r'FECHA_INFORME:\s*(.+)', block)
+    puede_match = re.search(r'PUEDE_CONTINUAR:\s*(.+)', block)
+    motivo_match = re.search(r'MOTIVO:\s*(.+)', block)
     return {
         "ramo": ramo_match.group(1).strip() if ramo_match else "",
         "curso": curso_match.group(1).strip() if curso_match else "",
         "diagnostico": diag_match.group(1).strip() if diag_match else "",
+        "fecha_informe": fecha_match.group(1).strip() if fecha_match else "",
+        "puede_continuar": puede_match.group(1).strip() if puede_match else "",
+        "motivo": motivo_match.group(1).strip() if motivo_match else "",
+        "pii_detectado": "---PII_DETECTADO---" in perfil_paci,
     }
 
 
@@ -279,6 +291,17 @@ class PaciWorkflowAgent(BaseAgent):
             critico_agent=_critico,
         )
 
+    def _commit_state(self, ctx: InvocationContext, **delta) -> Event:
+        """Escribe estado terminal y lo persiste vía state_delta.
+
+        La mutación directa de ctx.session.state NO sobrevive al get_session()
+        que lee run.py al finalizar; ADK solo persiste lo que viaja en el
+        state_delta de un Event. Por eso los valores terminales que run.py
+        consume (status, warnings, validation_*) deben emitirse así.
+        """
+        ctx.session.state.update(delta)
+        return Event(author=self.name, actions=EventActions(state_delta=delta))
+
     async def _run_async_impl(
         self, ctx: InvocationContext
     ) -> AsyncGenerator[Event, None]:
@@ -288,6 +311,21 @@ class PaciWorkflowAgent(BaseAgent):
         async for event in _run_with_timeout(self.analizador_paci_agent, ctx, "Agente 1"):
             yield event
         if ctx.session.state.get("status") == "timeout":
+            return
+
+        # ── Gate de compliance del PACI (Decretos 170/83) ────────────────────
+        meta = _extract_metadatos(ctx.session.state.get("perfil_paci", ""))
+        compliance = evaluate_paci_compliance(meta, date.today())
+        if compliance.blocked:
+            print(f"\n[GATE] PACI bloqueado: {compliance.code} — {compliance.reason}\n")
+            # El evento SSE terminal lo emite _finalize_result (camino API). Aquí solo
+            # persistimos el estado terminal vía state_delta para que run.py lo lea.
+            yield self._commit_state(
+                ctx,
+                status="validation_failed",
+                validation_code=compliance.code,
+                validation_reason=compliance.reason,
+            )
             return
 
         # ── Book Repository: materiales de referencia del establecimiento ────
@@ -395,26 +433,39 @@ class PaciWorkflowAgent(BaseAgent):
             evaluacion_raw = ctx.session.state.get("evaluacion_critica", "")
             print(f"\n[DEBUG] Respuesta cruda del Agente Crítico:\n{str(evaluacion_raw)[:500]}\n")
             evaluacion = _parse_critic_json(evaluacion_raw)
+            decision = interpret_critic_decision(evaluacion)
 
-            if evaluacion.get("acceptable", False):
-                print(f"\n✓ Rúbrica aprobada en iteración {iteration}.\n")
-                ctx.session.state["status"] = "success"
+            if decision.action == "block_critical":
+                codigos = ", ".join(decision.critical_issues)
+                print(f"\n[GATE] Rúbrica con ítem crítico ({codigos}) — deteniendo sin reintentar.\n")
+                yield self._commit_state(
+                    ctx,
+                    status="compliance_blocked",
+                    validation_code="rubrica_critica",
+                    validation_reason=(
+                        "La rúbrica generada incumple una restricción normativa crítica "
+                        f"({codigos}: datos personales, diagnóstico expuesto, lenguaje "
+                        "estigmatizante o exención). El proceso se detuvo por seguridad. "
+                        "(Decreto 67/2018 — Decreto 170/2010)"
+                    ),
+                )
                 break
 
+            if decision.action == "accept":
+                print(f"\n✓ Rúbrica aprobada en iteración {iteration} (score {decision.score}).\n")
+                yield self._commit_state(ctx, status="success", warnings=decision.warnings)
+                break
+
+            # decision.action == "regenerate"
             if iteration < MAX_ITERATIONS:
-                critique = evaluacion.get("critique", "Sin descripción.")
-                suggestions = evaluacion.get("suggestions", [])
-                suggestions_text = "\n".join(f"- {s}" for s in suggestions)
                 ctx.session.state["critica_previa"] = (
-                    f"RETROALIMENTACIÓN EVALUADOR (iteración {iteration}):\n"
-                    f"{critique}\n\n"
-                    f"SUGERENCIAS A INCORPORAR:\n"
-                    f"{suggestions_text}"
+                    f"RETROALIMENTACIÓN EVALUADOR (iteración {iteration}, score {decision.score}):\n"
+                    f"{decision.regeneration_instructions}"
                 )
-                print(f"\n✗ Rúbrica rechazada. Reintentando con retroalimentación...\n")
+                print("\n✗ Rúbrica rechazada. Reintentando con retroalimentación...\n")
             else:
-                print(f"\n⚠ Máximo de iteraciones alcanzado. Se entrega la última versión generada.\n")
-                ctx.session.state["status"] = "fail"
+                print("\n⚠ Máximo de iteraciones alcanzado. Se entrega la última versión generada.\n")
+                yield self._commit_state(ctx, status="fail")
 
 
 def _parse_critic_json(raw) -> dict:
@@ -426,8 +477,13 @@ def _parse_critic_json(raw) -> dict:
     except (json.JSONDecodeError, AttributeError):
         return {
             "acceptable": False,
+            "must_regenerate": True,
+            "score": 0,
             "critique": str(raw),
             "suggestions": ["El Agente Crítico no retornó JSON válido. Revisar la rúbrica manualmente."],
+            "critical_issues": [],
+            "warnings_for_teacher": [],
+            "regeneration_instructions": "",
         }
 
 
