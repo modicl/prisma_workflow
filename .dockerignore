@@ -1,0 +1,39 @@
+# Entornos virtuales y caches de Python
+venv
+.venv
+**/__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.mypy_cache
+.coverage
+htmlcov
+
+# Secretos / entorno local
+.env
+.env.*
+*.env
+
+# VCS y editor
+.git
+.gitignore
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Artefactos y material que no debe ir a la imagen del servicio
+frontend
+docs
+docs_test
+token_reports
+prisma_agents/token_reports
+prisma_agents/tests
+superpowers
+lambda
+Dockerfile
+.dockerignore
+README.md
