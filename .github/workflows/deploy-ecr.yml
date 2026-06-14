@@ -11,7 +11,7 @@ name: Build & Push to ECR
 
 on:
   push:
-    branches: [develop]
+    branches: [aws-deploy]
   workflow_dispatch:
 
 env:
