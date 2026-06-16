@@ -20,7 +20,7 @@ from google.genai import types as genai_types
 
 
 _PDF_MIME = "application/pdf"
-_MODEL = "gemini-2.5-flash-lite"
+_MODEL = "gemini-3.1-flash-lite"
 MIN_TEXT_CHARS = 200  # umbral mínimo para considerar que python-docx extrajo contenido útil
 
 _IMAGE_MIMES = {

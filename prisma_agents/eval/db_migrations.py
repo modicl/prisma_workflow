@@ -51,6 +51,29 @@ MIGRATIONS = [
     CREATE INDEX IF NOT EXISTS idx_eval_results_session_id
         ON eval_results (session_id)
     """,
+    # Auditoría legal de decisiones HITL del docente (APPEND-ONLY).
+    # Evidencia de quién aprobó/rechazó cada rúbrica y cuándo. La rúbrica tiene
+    # efectos legales sobre un menor (Decretos 67/83/170): debe ser trazable.
+    # El código (utils/audit_log.py) solo inserta; no actualiza ni borra.
+    """
+    CREATE TABLE IF NOT EXISTS hitl_approvals (
+        id              BIGSERIAL PRIMARY KEY,
+        session_id      TEXT NOT NULL,
+        teacher_id      TEXT,                 -- sub del JWT (owner_id); NULL en sesiones legacy
+        approved        BOOLEAN NOT NULL,
+        reason          TEXT,
+        attempt         INTEGER NOT NULL,
+        max_attempts    INTEGER NOT NULL,
+        agent_to_retry  INTEGER,
+        plan_sha256     TEXT,                 -- hash del plan revisado: prueba qué versión se aprobó
+        decided_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """,
+    # Índice para reconstruir el historial de aprobaciones de una sesión
+    """
+    CREATE INDEX IF NOT EXISTS idx_hitl_approvals_session_id
+        ON hitl_approvals (session_id)
+    """,
 ]
 
 

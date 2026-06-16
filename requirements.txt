@@ -9,8 +9,11 @@ python-multipart==0.0.22
 httpx==0.28.1
 
 # ── Autenticación JWT ─────────────────────────────────────────────
-PyJWT>=2.10.1
-cryptography>=41.0.0        # requerido por PyJWT para verificar ES256 (Supabase JWKS)
+# Versiones fijadas: PyJWT y cryptography verifican la firma del JWT (ES256).
+# Un pin flotante permitiría que una versión futura comprometida o con regresión
+# entre sin control en un componente crítico de seguridad.
+PyJWT==2.12.1
+cryptography==46.0.6        # requerido por PyJWT para verificar ES256 (Supabase JWKS)
 
 # ── AWS ───────────────────────────────────────────────────────────
 boto3==1.38.0
@@ -25,9 +28,9 @@ python-docx==1.2.0
 python-dotenv==1.2.2
 
 # ── Tests ─────────────────────────────────────────────────────────
-pytest>=8.0.0
+pytest==8.4.2
 pytest-asyncio==0.24.0
-pytest-cov>=5.0.0
+pytest-cov==7.1.0
 
 # ── Libreria que necesitan pc's Mac ─────────────────────────────────────────────────────────
 greenlet==3.5.0

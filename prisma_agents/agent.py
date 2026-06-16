@@ -131,7 +131,7 @@ def _classify_response(respuesta: str) -> bool:
     """
     prompt = _CLASSIFY_PROMPT.format(respuesta=respuesta)
     response = _get_genai_client().models.generate_content(
-        model="gemini-2.5-flash-lite",
+        model="gemini-3.1-flash-lite",
         contents=prompt,
         config=genai_types.GenerateContentConfig(max_output_tokens=5),
     )

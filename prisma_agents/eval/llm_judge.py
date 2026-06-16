@@ -12,7 +12,7 @@ from pathlib import Path
 
 from google import genai
 
-MODEL = "gemini-2.5-flash-lite"
+MODEL = "gemini-3.1-flash-lite"
 GOLDEN_SET_DIR = Path(__file__).parent / "golden_set"
 
 # Dimensiones de evaluación por agente (escala 1-5)

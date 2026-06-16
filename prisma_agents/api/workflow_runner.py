@@ -11,6 +11,7 @@ import boto3
 from api import dynamo_store
 from api.session_store import SESSIONS, HITL_CALLBACKS, sync_to_dynamo
 from run import run_workflow
+from utils.audit_log import record_hitl_decision
 from utils.input_validator import validate_prompt_docente
 
 S3_BUCKET = os.environ.get("S3_BUCKET", "")
@@ -90,6 +91,18 @@ def _make_hitl_callback(
         # Agente 2 (Adaptador), que es lo que revisa el checkpoint. El caso de intentos
         # agotados se maneja aparte retornando el sentinel 0.
         agent_to_retry = int(response.get("agent_to_retry") or 2)
+
+        # Auditoría legal: registrar la decisión del docente (append-only, no bloqueante).
+        await record_hitl_decision(
+            session_id=session_id,
+            teacher_id=session_data.owner_id,
+            approved=approved,
+            reason=reason,
+            attempt=attempt,
+            max_attempts=max_attempts,
+            agent_to_retry=agent_to_retry if not approved else None,
+            plan_reviewed=state.get("planificacion_adaptada", ""),
+        )
 
         # Si es el último intento y el docente rechaza, señalizamos directamente.
         if not approved and attempt >= max_attempts:

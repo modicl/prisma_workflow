@@ -5,7 +5,22 @@ con formato limpio, eliminando el markdown bruto (##, **, tablas) y sin incluir 
 import os
 import re
 from docx import Document
-from docx.shared import Pt
+from docx.shared import Pt, RGBColor
+
+_AI_DISCLAIMER = (
+    "Documento generado con asistencia de inteligencia artificial. Requiere revisión "
+    "y validación de un profesional docente antes de su uso. No constituye un documento "
+    "oficial ni una decisión pedagógica definitiva hasta su aprobación profesional."
+)
+
+
+def _add_ai_disclaimer(doc):
+    """Agrega un aviso visible de que el documento es asistido por IA y requiere validación docente."""
+    p = doc.add_paragraph()
+    run = p.add_run("⚠ " + _AI_DISCLAIMER)
+    run.italic = True
+    run.font.size = Pt(9)
+    run.font.color.rgb = RGBColor(0x80, 0x80, 0x80)
 
 def _add_formatted_runs(paragraph, text):
     """
@@ -120,6 +135,9 @@ def export_results_to_docx(results: dict, output_filename: str = "resultado_paci
     # Título principal
     doc.add_heading('Documento de Apoyo Docente - Material Adaptado', 0)
 
+    # Aviso de asistencia por IA (visible al inicio del documento)
+    _add_ai_disclaimer(doc)
+
     # 1. Planificación Adaptada
     doc.add_heading('1. Planificación de la Actividad Adaptada', level=1)
     if results.get("planificacion_adaptada"):
@@ -137,6 +155,10 @@ def export_results_to_docx(results: dict, output_filename: str = "resultado_paci
         doc.add_paragraph("(No se generó rúbrica)")
 
     # Se omitió el Perfil PACI para no enviar información redundante al docente
-    
+
+    # Repetir el aviso al cierre: hay un salto de página entre secciones y el docente
+    # podría usar solo la página de la rúbrica, donde no se ve el aviso superior.
+    _add_ai_disclaimer(doc)
+
     doc.save(output_filename)
     return os.path.abspath(output_filename)
