@@ -64,7 +64,7 @@ def select_materials_with_llm(index: dict, perfil_paci: str) -> list[str]:
         f"PERFIL DEL ESTUDIANTE:\n{perfil_paci}"
     )
     response = client.models.generate_content(
-        model="gemini-2.5-flash-lite",
+        model="gemini-3.1-flash-lite",
         contents=[prompt],
     )
     text = response.text.strip()
@@ -127,7 +127,7 @@ def transcribe_material_from_s3(school_id: str, subject: str, grade: str, filena
                     config={"mime_type": _mime_type_for(filename), "display_name": filename},
                 )
             response = client.models.generate_content(
-                model="gemini-2.5-flash-lite",
+                model="gemini-3.1-flash-lite",
                 contents=[
                     uploaded,
                     "Extrae y transcribe el texto completo de este material educativo. "

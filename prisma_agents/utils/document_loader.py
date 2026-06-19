@@ -18,9 +18,11 @@ from docx import Document
 from google import genai
 from google.genai import types as genai_types
 
+from utils.text_compactor import compact_text
+
 
 _PDF_MIME = "application/pdf"
-_MODEL = "gemini-2.5-flash-lite"
+_MODEL = "gemini-3.1-flash-lite"
 MIN_TEXT_CHARS = 200  # umbral mínimo para considerar que python-docx extrajo contenido útil
 
 _IMAGE_MIMES = {
@@ -130,6 +132,7 @@ def _load_pdf_via_gemini(path: Path, label: str | None) -> str:
             "El documento puede estar protegido con contraseña o dañado."
         )
 
+    extracted = compact_text(extracted)
     prefix = f"[Documento PDF: {label or path.name}]\n\n" if label else f"[{path.name}]\n\n"
     text = prefix + extracted
     print(f"  ✓ {label or path.name} cargado ({len(text):,} caracteres) [Gemini]")
@@ -158,7 +161,7 @@ def _load_docx(path: Path, label: str | None) -> str:
 
     if len(text_from_xml) >= MIN_TEXT_CHARS:
         prefix = f"[Documento DOCX: {label or path.name}]\n\n" if label else f"[{path.name}]\n\n"
-        text = prefix + text_from_xml
+        text = prefix + compact_text(text_from_xml)
         print(f"  ✓ {label or path.name} cargado ({len(text):,} caracteres) [local]")
         return text
 
@@ -170,7 +173,7 @@ def _load_docx(path: Path, label: str | None) -> str:
     if not images:
         if text_from_xml.strip():
             prefix = f"[Documento DOCX: {label or path.name}]\n\n" if label else f"[{path.name}]\n\n"
-            return prefix + text_from_xml
+            return prefix + compact_text(text_from_xml)
         raise ValueError(
             f"No se pudo extraer texto de '{path.name}'. "
             "El archivo parece estar vacío. "
@@ -181,7 +184,7 @@ def _load_docx(path: Path, label: str | None) -> str:
     combined = "\n\n".join(filter(None, [text_from_xml, ocr_text]))
 
     prefix = f"[Documento DOCX: {label or path.name}]\n\n" if label else f"[{path.name}]\n\n"
-    text = prefix + combined
+    text = prefix + compact_text(combined)
     print(f"  ✓ {label or path.name} cargado ({len(text):,} caracteres) [local + OCR Gemini]")
     return text
 
