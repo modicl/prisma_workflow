@@ -74,6 +74,23 @@ def test_load_pdf_uses_gemini_for_digital_pdf(tmp_path):
     mock_client.files.delete.assert_called_once_with(name="files/mock123")
 
 
+def test_load_pdf_compacts_extracted_text(tmp_path):
+    """El texto extraído del PDF se compacta (whitespace/marcadores) antes de retornar."""
+    pdf = tmp_path / "ruidoso.pdf"
+    pdf.write_bytes(b"%PDF-1.4 texto")
+
+    noisy = "Diagnóstico   TEA.\n\n\n\n3\nAdecuación curricular."
+    mock_client = _make_gemini_client(noisy)
+
+    with patch("utils.document_loader.genai.Client", return_value=mock_client), \
+         patch.dict(os.environ, {"GOOGLE_API_KEY": "test-key"}):
+        result = dl.load_document(str(pdf), label="PACI Test")
+
+    # runs de espacios colapsados, blank lines colapsadas, marcador de página "3" eliminado
+    assert "Diagnóstico TEA.\n\nAdecuación curricular." in result
+    assert "\n\n\n" not in result
+
+
 def test_load_pdf_uses_gemini_for_scanned_pdf(tmp_path):
     """Un PDF puramente escaneado (sin texto seleccionable) también pasa por Gemini."""
     pdf = tmp_path / "scanned.pdf"
