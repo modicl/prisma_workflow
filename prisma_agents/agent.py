@@ -131,9 +131,12 @@ def _classify_response(respuesta: str) -> bool:
     """
     prompt = _CLASSIFY_PROMPT.format(respuesta=respuesta)
     response = _get_genai_client().models.generate_content(
-        model="gemini-2.5-flash-lite",
+        model="gemini-3.1-flash-lite",
         contents=prompt,
-        config=genai_types.GenerateContentConfig(max_output_tokens=5),
+        # 16 tokens: "APROBADO"/"RECHAZADO" se truncaban a "AP" con límites bajos
+        # en gemini-3.1-flash-lite (tokeniza distinto que 2.5), leyendo toda
+        # aprobación como rechazo y disparando el loop HITL.
+        config=genai_types.GenerateContentConfig(max_output_tokens=16),
     )
     return response.text.strip().upper() == "APROBADO"
 

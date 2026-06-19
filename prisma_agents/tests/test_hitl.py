@@ -44,6 +44,18 @@ class TestClassifyResponse:
             mock_get.return_value.models.generate_content.return_value = _make_mock_response("No sé")
             assert _classify_response("quizás") is False
 
+    def test_pide_suficientes_output_tokens(self):
+        """gemini-3.1-flash-lite trunca 'APROBADO' a 'AP' con max_output_tokens=5,
+        leyendo toda aprobación como rechazo. El clasificador debe pedir suficientes
+        tokens para emitir la palabra completa (APROBADO/RECHAZADO)."""
+        from agent import _classify_response
+        with patch("agent._get_genai_client") as mock_get:
+            gen = mock_get.return_value.models.generate_content
+            gen.return_value = _make_mock_response("APROBADO")
+            _classify_response("sí")
+            cfg = gen.call_args.kwargs["config"]
+            assert cfg.max_output_tokens >= 16
+
 
 class TestHitlCheckpoint:
     """Tests para la función _hitl_checkpoint() (async)."""
