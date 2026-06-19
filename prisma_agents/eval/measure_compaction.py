@@ -93,6 +93,22 @@ def measure(text: str, with_tokens: bool = False) -> None:
             print(f"  Tokens     : {tb:,} → {ta:,}   (−{_pct(tb, ta)})  [Gemini real]")
 
 
+def read_input_file(path_str: str, base: Path | None = None) -> str:
+    """Lee un archivo de texto validando la ruta contra path traversal.
+
+    Confina la lectura al directorio base (por defecto el cwd): resuelve la ruta
+    y rechaza cualquier objetivo fuera de ese árbol (incluye rutas absolutas y
+    componentes '..').
+    """
+    base = (base or Path.cwd()).resolve()
+    target = (base / path_str).resolve()
+    if not target.is_relative_to(base):
+        raise SystemExit(f"Ruta fuera del directorio del proyecto: {path_str}")
+    if not target.is_file():
+        raise SystemExit(f"No es un archivo válido: {path_str}")
+    return target.read_text(encoding="utf-8")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Mide el ahorro del compactador de texto.")
     ap.add_argument("path", nargs="?", help="Archivo de texto a medir.")
@@ -105,7 +121,7 @@ def main() -> None:
         measure(_DEMO, with_tokens=args.tokens)
         return
 
-    text = Path(args.path).read_text(encoding="utf-8")
+    text = read_input_file(args.path)
     print(f"── {args.path} ──")
     measure(text, with_tokens=args.tokens)
 
