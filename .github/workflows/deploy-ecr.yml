@@ -47,3 +47,16 @@ jobs:
             -t "$REGISTRY/$ECR_REPOSITORY:latest" .
           docker push "$REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
           docker push "$REGISTRY/$ECR_REPOSITORY:latest"
+
+      - name: Force ECS redeploy
+        env:
+          ECS_CLUSTER: ${{ vars.ECS_CLUSTER || 'prisma-cluster' }}
+          ECS_SERVICE: ${{ vars.ECS_SERVICE || 'prisma-app' }}
+        run: |
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$ECS_SERVICE" \
+            --force-new-deployment \
+            --no-cli-pager \
+            --query 'service.{name:serviceName,desired:desiredCount,running:runningCount}' \
+            --output table
