@@ -10,51 +10,57 @@ Ejemplos:
 """
 
 import asyncio
-import json
 import sys
 import os
 import uuid
-from datetime import datetime
-from pathlib import Path
 from dotenv import load_dotenv
 
 # Carga .env desde la carpeta del script
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
+from utils.tracing import setup_tracing
+setup_tracing()
+
 from google.adk.runners import Runner
 from google.adk.sessions.database_session_service import DatabaseSessionService
+from google.adk.sessions.in_memory_session_service import InMemorySessionService
 from google.adk.plugins.logging_plugin import LoggingPlugin
 from google.genai.types import Content, Part
 
 # Importar root_agent y utilidades desde el paquete
 sys.path.insert(0, os.path.dirname(__file__))
-from agent import root_agent
+from agent import root_agent, _extract_metadatos
+from utils.curriculum_catalog import normalize_subject, normalize_grade
+from utils.nee_taxonomy import normalize_diagnostico
 from utils.document_loader import load_document
 from utils.document_exporter import export_results_to_docx
-from utils.token_tracker import SessionTokenUsage
-
-TOKEN_REPORTS_DIR = Path(__file__).parent / "token_reports"
-
-
-def _save_token_report(session_id: str, tracker: SessionTokenUsage, status: str) -> None:
-    """Persiste el reporte de tokens de la sesión en token_reports/."""
-    TOKEN_REPORTS_DIR.mkdir(exist_ok=True)
-    report = {
-        "session_id": session_id,
-        "timestamp": datetime.now().isoformat(),
-        "status": status,
-        "tokens": tracker.to_dict(),
-    }
-    out_path = TOKEN_REPORTS_DIR / f"tokens_{session_id}.json"
-    with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(report, f, ensure_ascii=False, indent=2)
-    if tracker.has_data:
-        print(f"  ✓ Token report: {report['tokens']['total']:,} tokens totales → {out_path.name}")
+from utils.input_validator import validate_prompt_docente
 
 APP_NAME = "paci_workflow"
 
 
-async def run_workflow(paci_path: str, material_path: str, prompt: str = "", user_id: str = "") -> dict:
+def _enrich_trace_span(state: dict, channel: str) -> None:
+    """Añade metadata y tags post-run al span raíz activo via propagate_attributes."""
+    from langfuse import propagate_attributes
+
+    perfil = state.get("perfil_paci", "")
+    meta = _extract_metadatos(perfil)
+    subject = normalize_subject(meta["ramo"]) or meta["ramo"] or "desconocida"
+    grade = normalize_grade(meta["curso"]) or meta["curso"] or "desconocido"
+    diagnostico = normalize_diagnostico(meta["diagnostico"])
+    status = state.get("status", "success")
+
+    try:
+        with propagate_attributes(
+            tags=[channel, f"materia:{subject}", f"curso:{grade}", f"diagnostico:{diagnostico}", status],
+            metadata={"materia": subject, "curso": grade, "diagnostico": diagnostico, "status": status},
+        ):
+            pass
+    except Exception:
+        pass
+
+
+async def run_workflow(paci_path: str, material_path: str, prompt: str = "", user_id: str = "", school_id: str = "", api_session_id: str = "") -> dict:
     """Ejecuta el flujo multi-agente PACI y retorna los resultados.
 
     Args:
@@ -71,9 +77,14 @@ async def run_workflow(paci_path: str, material_path: str, prompt: str = "", use
     print(f"  PACI:     {paci_path}")
     print(f"  Material: {material_path}")
     print(f"  User ID:  {effective_user_id}")
+    if school_id:
+        print(f"  School:   {school_id}")
     if prompt:
         print(f"  Prompt:   {prompt}")
     print(f"{'='*60}\n")
+
+    # Validar prompt antes de cargar documentos
+    validate_prompt_docente(prompt)
 
     # Cargar documentos
     print("[Cargando documentos...]")
@@ -81,21 +92,28 @@ async def run_workflow(paci_path: str, material_path: str, prompt: str = "", use
     material_text = load_document(material_path, label="Material Base")
     print("  ✓ Documentos cargados.\n")
 
-    # Configurar sesión con estado inicial en PostgreSQL
     db_url = os.environ.get("BD_LOGS")
-    if not db_url:
-        raise ValueError("Error: La variable de entorno BD_LOGS no está configurada en el .env")
-        
-    print("[Conectando a base de datos...]")
-    session_service = DatabaseSessionService(db_url=db_url)
+    if db_url:
+        print("[Conectando a base de datos...]")
+        session_service = DatabaseSessionService(db_url=db_url)
+    else:
+        print("  ⚠ BD_LOGS no configurado — usando sesión en memoria (sin persistencia).")
+        session_service = InMemorySessionService()
     
     session = await session_service.create_session(
         app_name=APP_NAME,
         user_id=effective_user_id,
+        session_id=api_session_id if api_session_id else None,
         state={
             "paci_document": paci_text,
             "material_document": material_text,
             "critica_previa": "",  # vacío en la primera iteración
+            "hitl_feedback_a1": "",   # feedback para AnalizadorPACI
+            "hitl_feedback_a2": "",   # feedback para Adaptador
+            "school_id": school_id,
+            "materiales_referencia": "",  # se setea en agent.py tras AnalizadorPACI
+            "prompt_docente": prompt,
+            "api_session_id": api_session_id,
         },
     )
 
@@ -109,67 +127,90 @@ async def run_workflow(paci_path: str, material_path: str, prompt: str = "", use
     # Mensaje inicial para activar el flujo
     mensaje_inicial = prompt if prompt else "Inicia el flujo PACI con los documentos proporcionados."
 
-    tracker = SessionTokenUsage()
+    from langfuse import get_client, propagate_attributes
+    channel = "api" if api_session_id else "cli"
+    trace_session_id = api_session_id if api_session_id else effective_user_id
 
-    async for event in runner.run_async(
-        user_id=effective_user_id,
-        session_id=session.id,
-        new_message=Content(parts=[Part(text=mensaje_inicial)]),
-    ):
-        # Capturar tokens por agente
-        author = getattr(event, "author", None) or "unknown"
-        tracker.add_event(author, event)
+    with get_client().start_as_current_observation(name="paci-workflow"):
+        with propagate_attributes(
+            user_id=effective_user_id,
+            session_id=trace_session_id,
+            trace_name="paci-workflow",
+            metadata={
+                "school_id": school_id or "sin_colegio",
+                "channel": channel,
+                "env": os.environ.get("ENV", "dev"),
+            },
+            tags=[channel],
+        ):
+            async for event in runner.run_async(
+                user_id=effective_user_id,
+                session_id=session.id,
+                new_message=Content(parts=[Part(text=mensaje_inicial)]),
+            ):
+                pass
 
-    # Recuperar resultados del estado de sesión
-    final_session = await session_service.get_session(
-        app_name=APP_NAME, user_id=effective_user_id, session_id=session.id
-    )
-    state = final_session.state
+            final_session = await session_service.get_session(
+                app_name=APP_NAME, user_id=effective_user_id, session_id=session.id
+            )
+            _state = final_session.state
+
+        # Fuera del with propagate_attributes pero dentro de start_as_current_observation:
+        # aquí el span raíz es el único activo → propagate_attributes lo encuentra directamente
+        _enrich_trace_span(_state, channel)
+
+    state = _state
 
     results = {
         "status": state.get("status", "success"),
         "perfil_paci": state.get("perfil_paci", ""),
         "planificacion_adaptada": state.get("planificacion_adaptada", ""),
         "rubrica_final": state.get("rubrica", ""),
+        "docx_path": None,
+        "validation_reason": state.get("validation_reason", ""),
+        "validation_code": state.get("validation_code", ""),
+        "warnings": state.get("warnings", []),
     }
 
-    # Persistir reporte de tokens
-    _save_token_report(session.id, tracker, results["status"])
+    # Exportar a DOCX solo si hay rúbrica generada
+    # (hitl_rejected y timeout terminan sin rúbrica → no se genera documento)
+    docx_path = None
+    if results.get("rubrica_final"):
+        print("[Generando archivo DOCX...]")
+        try:
+            base_name = os.path.basename(material_path).split('.')[0]
+            output_name = f"rubrica_adaptada_{base_name}.docx"
+            docx_path = export_results_to_docx(results, output_filename=output_name)
+            results["docx_path"] = str(docx_path)
+        except Exception as e:
+            print(f"  x Error al exportar a DOCX: {e}\n")
+    else:
+        print(f"  ℹ Sin rúbrica generada (estado: {results['status']}) — DOCX omitido.")
 
-    # Imprimir resultados finales
+    # Resumen final — el contenido queda en el DOCX, no en consola
     print(f"\n{'='*60}")
-    print("  RESULTADOS FINALES")
+    print("  FLUJO COMPLETADO")
+    print(f"{'='*60}")
+    print(f"  Estado : {results['status']}")
+    if docx_path:
+        print(f"  Archivo: {docx_path}")
+    else:
+        print("  Archivo: no generado (ver error arriba)")
     print(f"{'='*60}\n")
 
-    print("── PERFIL PACI ──────────────────────────────────────────")
-    print(results["perfil_paci"] or "(vacío)")
-
-    print("\n── PLANIFICACIÓN ADAPTADA ───────────────────────────────")
-    print(results["planificacion_adaptada"] or "(vacío)")
-
-    print("\n── RÚBRICA FINAL ────────────────────────────────────────")
-    print(results["rubrica_final"] or "(vacío)")
-
-    print(f"\n{'='*60}\n")
-
-    # Exportar a DOCX
-    print("[Generando archivo DOCX...]")
+    # Flush Langfuse traces before returning (critical for CLI mode — process exits after this)
     try:
-        # Generamos un nombre dinámico basado en el documento base para evitar sobreescribir siempre el mismo
-        base_name = os.path.basename(material_path).split('.')[0]
-        output_name = f"rubrica_adaptada_{base_name}.docx"
-        docx_path = export_results_to_docx(results, output_filename=output_name)
-        print(f"  ✓ ¡Documento exportado con éxito y listo para editar!")
-        print(f"  Ruta: {docx_path}\n")
-    except Exception as e:
-        print(f"  x Error al exportar a DOCX: {e}\n")
+        from langfuse import get_client
+        get_client().flush()
+    except Exception:
+        pass
 
     return results
 
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        print("Uso: python run.py <paci_path> <material_path> [prompt_adicional] [user_id]")
+        print("Uso: python run.py <paci_path> <material_path> [prompt_adicional] [user_id] [school_id]")
         sys.exit(1)
 
     paci_path = sys.argv[1]
@@ -177,5 +218,6 @@ if __name__ == "__main__":
     prompt_adicional = sys.argv[3] if len(sys.argv) > 3 else ""
     # Desde CLI el user_id es opcional; si se omite, run_workflow genera un UUID.
     user_id_arg = sys.argv[4] if len(sys.argv) > 4 else ""
+    school_id_arg = sys.argv[5] if len(sys.argv) > 5 else ""
 
-    asyncio.run(run_workflow(paci_path, material_path, prompt_adicional, user_id_arg))
+    asyncio.run(run_workflow(paci_path, material_path, prompt_adicional, user_id_arg, school_id_arg))

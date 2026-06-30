@@ -2,9 +2,22 @@
 venv/
 .claude/
 .env
+.worktrees/
 
 docs/
 docs_test/
+superpowers/
+.superpowers/
+
+.pytest_cache/
+**/.pytest_cache/
+
+prisma_agents/token_reports/
 
 *.pdf
 *.docx
+
+node_modules/
+dist/
+
+CLAUDE.md
