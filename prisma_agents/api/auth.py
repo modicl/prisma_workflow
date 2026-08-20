@@ -4,7 +4,9 @@ import jwt
 from fastapi import Header, HTTPException, Query
 from jwt import PyJWKClient
 
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
+COGNITO_REGION = os.environ.get("COGNITO_REGION", "us-east-1")
+COGNITO_USER_POOL_ID = os.environ.get("COGNITO_USER_POOL_ID", "")
+COGNITO_CLIENT_ID = os.environ.get("COGNITO_CLIENT_ID", "")
 
 _jwks_client: PyJWKClient | None = None
 
@@ -12,9 +14,10 @@ _jwks_client: PyJWKClient | None = None
 def _get_jwks_client() -> PyJWKClient:
     global _jwks_client
     if _jwks_client is None:
-        if not SUPABASE_URL:
-            raise HTTPException(status_code=500, detail="SUPABASE_URL no configurado")
-        _jwks_client = PyJWKClient(f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json")
+        if not COGNITO_USER_POOL_ID:
+            raise HTTPException(status_code=500, detail="COGNITO_USER_POOL_ID no configurado")
+        issuer = f"https://cognito-idp.{COGNITO_REGION}.amazonaws.com/{COGNITO_USER_POOL_ID}"
+        _jwks_client = PyJWKClient(f"{issuer}/.well-known/jwks.json")
     return _jwks_client
 
 
@@ -35,14 +38,17 @@ def get_current_user(
     if not raw_token:
         raise HTTPException(status_code=401, detail="Token de autorización requerido")
 
+    issuer = f"https://cognito-idp.{COGNITO_REGION}.amazonaws.com/{COGNITO_USER_POOL_ID}"
+
     try:
         client = _get_jwks_client()
         signing_key = client.get_signing_key_from_jwt(raw_token)
         payload = jwt.decode(
             raw_token,
             signing_key.key,
-            algorithms=["ES256"],
-            audience="authenticated",
+            algorithms=["RS256"],
+            issuer=issuer,
+            options={"verify_aud": False},
         )
     except HTTPException:
         raise
