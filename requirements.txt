@@ -10,7 +10,7 @@ httpx==0.28.1
 
 # ── Autenticación JWT ─────────────────────────────────────────────
 PyJWT>=2.10.1
-cryptography>=41.0.0        # requerido por PyJWT para verificar ES256 (Supabase JWKS)
+cryptography>=41.0.0        # requerido por PyJWT para verificar RS256 (JWKS de Cognito)
 
 # ── AWS ───────────────────────────────────────────────────────────
 boto3==1.38.0
