@@ -74,3 +74,14 @@ class ApprovalFeedbackRequest(BaseModel):
 
 class FeedbackResponse(BaseModel):
     success: bool = Field(..., description="True si el score fue registrado en Langfuse")
+
+
+class PhaseBody(BaseModel):
+    """Cuerpo de las fases internas de Step Functions. El token es secreto: nunca se registra en logs."""
+    task_token: str = Field(..., description="Token de la tarea de Step Functions (waitForTaskToken)")
+    attempt: int = Field(1, ge=1, description="Número del intento HITL (1 = análisis inicial)")
+    feedback_agent: int = Field(0, ge=0, le=2, description="0 = ninguno; 1 = rehacer Agente 1; 2 = rehacer solo Agente 2")
+
+
+class FinalizeBody(BaseModel):
+    status: str = Field(..., description="Estado final: success, degraded, compliance_blocked, hitl_rejected, expired, timeout o error")

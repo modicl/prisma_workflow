@@ -5,7 +5,7 @@ import os
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -13,13 +13,15 @@ import boto3
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Header, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 
-from api import dynamo_store
+from api import dynamo_store, workflow_runner
 from api.auth import get_current_user
 from api.schemas import (
     DownloadResponse,
+    FinalizeBody,
     HitlResponseBody,
     InternalRunResponse,
     OkResponse,
+    PhaseBody,
     SessionStateResponse,
     StartChatResponse,
 )
@@ -308,6 +310,18 @@ async def get_state(session_id: str, _user: dict = Depends(get_current_user)):
 )
 async def respond_hitl(session_id: str, body: HitlResponseBody, _user: dict = Depends(get_current_user)):
     sd = SESSIONS.get(session_id)
+    if sd is None and dynamo_store.enabled():
+        item = dynamo_store.get_session(session_id)
+        if item is not None:
+            # Sesión orquestada por Step Functions: no vive en la RAM de este proceso (otra tarea de ECS pudo correr la fase).
+            _assert_owner(item.get("owner_id"), _user["sub"])
+            try:
+                await asyncio.to_thread(
+                    workflow_runner.submit_hitl_decision, session_id, item, body.approved, body.reason, body.agent_to_retry
+                )
+            except workflow_runner.HitlDecisionError as e:
+                raise HTTPException(status_code=e.status_code, detail=e.detail)
+            return {"ok": True}
     if sd is None:
         raise HTTPException(status_code=404, detail="Sesión no encontrada")
     _assert_owner(sd.owner_id, _user["sub"])
@@ -337,6 +351,14 @@ async def respond_hitl(session_id: str, body: HitlResponseBody, _user: dict = De
 )
 async def cancel_session(session_id: str, _user: dict = Depends(get_current_user)):
     sd = SESSIONS.get(session_id)
+    if sd is None and dynamo_store.enabled():
+        item = dynamo_store.get_session(session_id)
+        if item is not None:
+            _assert_owner(item.get("owner_id"), _user["sub"])
+            if item.get("phase") in ("completed", "error"):
+                raise HTTPException(status_code=409, detail="La sesión ya ha terminado")
+            await asyncio.to_thread(workflow_runner.cancel_session_sfn, session_id, item)
+            return {"ok": True}
     if sd is None:
         raise HTTPException(status_code=404, detail="Sesión no encontrada")
     _assert_owner(sd.owner_id, _user["sub"])
@@ -457,4 +479,57 @@ async def internal_run(
         school_id=item["school_id"],
     ))
     SESSIONS[session_id].task = task
+    return {"started": True}
+
+
+# ── Fases (Step Functions): las llama la Lambda `invoker` ────────────────────────────────────────────────
+PHASE_LOCK_SECONDS = int(os.environ.get("PHASE_LOCK_SECONDS", "1800"))
+_BACKGROUND: set = set()          # referencias a las tareas en segundo plano (si no, el recolector puede cancelarlas)
+
+
+def _require_internal(token: Optional[str]) -> None:
+    if not INTERNAL_TOKEN or token != INTERNAL_TOKEN:
+        raise HTTPException(status_code=401, detail="Token interno inválido")
+
+
+def _item_or_404(session_id: str) -> dict:
+    item = dynamo_store.get_session(session_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Sesión no encontrada en DynamoDB")
+    return item
+
+
+@router.post("/internal/phase/wait/{session_id}", tags=["Internal"], response_model=OkResponse,
+             summary="Estado EsperarDocente: guarda el token de tarea y pasa la sesión a awaiting_hitl")
+async def internal_phase_wait(session_id: str, body: PhaseBody, x_internal_token: Optional[str] = Header(None)):
+    _require_internal(x_internal_token)
+    item = _item_or_404(session_id)
+    await asyncio.to_thread(workflow_runner.register_wait, session_id, item, body.task_token, body.attempt)
+    return {"ok": True}
+
+
+@router.post("/internal/phase/finalize/{session_id}", tags=["Internal"], response_model=OkResponse,
+             summary="Estado Finalizar: deja la sesión terminada y limpia el estado")
+async def internal_phase_finalize(session_id: str, body: FinalizeBody, x_internal_token: Optional[str] = Header(None)):
+    _require_internal(x_internal_token)
+    item = _item_or_404(session_id)
+    await asyncio.to_thread(workflow_runner.finalize_session, session_id, item, body.status)
+    return {"ok": True}
+
+
+@router.post("/internal/phase/{phase}/{session_id}", tags=["Internal"], response_model=InternalRunResponse, status_code=202,
+             summary="Ejecutar una fase del flujo (a: análisis y adaptación · b: rúbrica y crítico)")
+async def internal_phase(phase: Literal["a", "b"], session_id: str, body: PhaseBody,
+                         x_internal_token: Optional[str] = Header(None)):
+    _require_internal(x_internal_token)
+    item = _item_or_404(session_id)
+    if phase == "a" and item.get("school_id") == "__mock_dead__":
+        return {"started": True}          # simula un worker que no responde: prueba de heartbeat en LocalStack
+    if not dynamo_store.acquire_phase(session_id, f"{phase}:{body.attempt}", PHASE_LOCK_SECONDS):
+        return {"started": False}         # otra ejecución de esta fase está en curso (mensaje repetido o heartbeat perdido)
+    tarea = asyncio.create_task(
+        workflow_runner.run_phase_job(phase, session_id, item, body.task_token, body.attempt, body.feedback_agent)
+    )
+    _BACKGROUND.add(tarea)
+    tarea.add_done_callback(_BACKGROUND.discard)
     return {"started": True}
