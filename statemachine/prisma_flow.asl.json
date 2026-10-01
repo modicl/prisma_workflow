@@ -4,7 +4,10 @@
   "States": {
     "Iniciar": {
       "Type": "Pass",
-      "Result": { "attempt": 1, "feedback_agent": 0 },
+      "Result": {
+        "attempt": 1,
+        "feedback_agent": 0
+      },
       "ResultPath": "$.ctx",
       "Next": "FaseA"
     },
@@ -25,17 +28,34 @@
       "HeartbeatSecondsPath": "$.timeouts.heartbeat",
       "ResultPath": "$.fase",
       "Retry": [
-        { "ErrorEquals": ["States.HeartbeatTimeout"], "IntervalSeconds": 5, "MaxAttempts": 1, "BackoffRate": 1.0 }
+        {
+          "ErrorEquals": [
+            "States.HeartbeatTimeout"
+          ],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 1,
+          "BackoffRate": 1.0
+        }
       ],
       "Catch": [
-        { "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "PrepError" }
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "PrepError"
+        }
       ],
       "Next": "RutaFaseA"
     },
     "RutaFaseA": {
       "Type": "Choice",
       "Choices": [
-        { "Variable": "$.fase.status", "StringEquals": "ok", "Next": "EsperarDocente" }
+        {
+          "Variable": "$.fase.status",
+          "StringEquals": "ok",
+          "Next": "EsperarDocente"
+        }
       ],
       "Default": "FinalDesdeFase"
     },
@@ -53,20 +73,56 @@
       },
       "TimeoutSecondsPath": "$.timeouts.hitl",
       "ResultPath": "$.decision",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException",
+            "States.TaskFailed"
+          ],
+          "IntervalSeconds": 10,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
       "Catch": [
-        { "ErrorEquals": ["States.Timeout"], "ResultPath": "$.error", "Next": "PrepExpirada" },
-        { "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "PrepError" }
+        {
+          "ErrorEquals": [
+            "States.Timeout"
+          ],
+          "ResultPath": "$.error",
+          "Next": "PrepExpirada"
+        },
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "PrepError"
+        }
       ],
       "Next": "DecidirHitl"
     },
     "DecidirHitl": {
       "Type": "Choice",
       "Choices": [
-        { "Variable": "$.decision.approved", "BooleanEquals": true, "Next": "FaseB" },
+        {
+          "Variable": "$.decision.approved",
+          "BooleanEquals": true,
+          "Next": "FaseB"
+        },
         {
           "And": [
-            { "Variable": "$.decision.approved", "BooleanEquals": false },
-            { "Variable": "$.ctx.attempt", "NumericGreaterThanEquals": 3 }
+            {
+              "Variable": "$.decision.approved",
+              "BooleanEquals": false
+            },
+            {
+              "Variable": "$.ctx.attempt",
+              "NumericGreaterThanEquals": 3
+            }
           ],
           "Next": "PrepRechazada"
         }
@@ -97,34 +153,55 @@
       "HeartbeatSecondsPath": "$.timeouts.heartbeat",
       "ResultPath": "$.fase",
       "Retry": [
-        { "ErrorEquals": ["States.HeartbeatTimeout"], "IntervalSeconds": 5, "MaxAttempts": 1, "BackoffRate": 1.0 }
+        {
+          "ErrorEquals": [
+            "States.HeartbeatTimeout"
+          ],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 1,
+          "BackoffRate": 1.0
+        }
       ],
       "Catch": [
-        { "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "PrepError" }
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "PrepError"
+        }
       ],
       "Next": "FinalDesdeFase"
     },
     "FinalDesdeFase": {
       "Type": "Pass",
-      "Parameters": { "status.$": "$.fase.status" },
+      "Parameters": {
+        "status.$": "$.fase.status"
+      },
       "ResultPath": "$.final",
       "Next": "Finalizar"
     },
     "PrepError": {
       "Type": "Pass",
-      "Result": { "status": "error" },
+      "Result": {
+        "status": "error"
+      },
       "ResultPath": "$.final",
       "Next": "Finalizar"
     },
     "PrepExpirada": {
       "Type": "Pass",
-      "Result": { "status": "expired" },
+      "Result": {
+        "status": "expired"
+      },
       "ResultPath": "$.final",
       "Next": "Finalizar"
     },
     "PrepRechazada": {
       "Type": "Pass",
-      "Result": { "status": "hitl_rejected" },
+      "Result": {
+        "status": "hitl_rejected"
+      },
       "ResultPath": "$.final",
       "Next": "Finalizar"
     },
@@ -142,10 +219,25 @@
       "ResultPath": null,
       "Retry": [
         {
-          "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException", "States.TaskFailed"],
-          "IntervalSeconds": 3,
-          "MaxAttempts": 3,
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException",
+            "States.TaskFailed"
+          ],
+          "IntervalSeconds": 10,
+          "MaxAttempts": 6,
           "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.error",
+          "Next": "Falla"
         }
       ],
       "Next": "Resultado"
@@ -155,15 +247,23 @@
       "Choices": [
         {
           "Or": [
-            { "Variable": "$.final.status", "StringEquals": "error" },
-            { "Variable": "$.final.status", "StringEquals": "timeout" }
+            {
+              "Variable": "$.final.status",
+              "StringEquals": "error"
+            },
+            {
+              "Variable": "$.final.status",
+              "StringEquals": "timeout"
+            }
           ],
           "Next": "Falla"
         }
       ],
       "Default": "Fin"
     },
-    "Fin": { "Type": "Succeed" },
+    "Fin": {
+      "Type": "Succeed"
+    },
     "Falla": {
       "Type": "Fail",
       "Error": "FlujoConError",

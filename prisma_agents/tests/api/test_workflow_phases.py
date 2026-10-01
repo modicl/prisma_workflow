@@ -167,7 +167,7 @@ async def test_job_exitoso_envia_success_y_libera_el_candado(entorno, sfn):
     with patch.object(wr, "run_phase_a", fase):
         await wr.run_phase_job("a", "s1", item(), "tok", 1, 0)
     sfn.send_success.assert_called_once_with("tok", {"status": "ok"})
-    sfn.release.assert_called_once_with("s1")
+    sfn.release.assert_called_once_with("s1", "tok")
 
 
 @pytest.mark.asyncio
@@ -175,7 +175,7 @@ async def test_job_con_estado_ausente_envia_failure_controlado_sin_texto(entorno
     """Foco de revisión 4: el estado de S3 no existe; la ejecución no se cuelga y no se filtra texto."""
     await wr.run_phase_job("b", "s1", item(), "tok", 1, 0)
     sfn.send_failure.assert_called_once_with("tok", "PhaseStateNotFound", "")
-    sfn.release.assert_called_once_with("s1")
+    sfn.release.assert_called_once_with("s1", "tok")
 
 
 @pytest.mark.asyncio
@@ -188,7 +188,7 @@ async def test_job_abandonado_no_envia_nada(entorno, sfn):
         await wr.run_phase_job("a", "s1", item(), "tok", 1, 0)
     sfn.send_success.assert_not_called()
     sfn.send_failure.assert_not_called()
-    sfn.release.assert_called_once_with("s1")
+    sfn.release.assert_called_once_with("s1", "tok")
 
 
 # ── espera del docente y finalización ───────────────────────────────────────

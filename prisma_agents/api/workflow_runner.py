@@ -468,7 +468,7 @@ async def run_phase_job(phase: str, session_id: str, item: dict, task_token: str
         except Exception:
             logger.warning("no se pudo informar el fallo de la fase %s de %s", phase, session_id)
     finally:
-        dynamo_store.release_phase(session_id)
+        dynamo_store.release_phase(session_id, task_token)
 
 
 def register_wait(session_id: str, item: dict, task_token: str, attempt: int) -> None:
@@ -514,18 +514,25 @@ def submit_hitl_decision(session_id: str, item: dict, approved: bool, reason: st
     """Decisión del docente: completa la espera de Step Functions. Lo usa POST /hitl (ya autenticado) y las pruebas E2E."""
     if item.get("phase") != "awaiting_hitl":
         raise HitlDecisionError(409, "La sesión no está esperando revisión HITL")
-    if not approved:
-        # La razón puede contener datos de un menor: va a S3 (cifrado), NUNCA por Step Functions.
-        phase_store.update_state(session_id, hitl_reason=reason or "")
-    token = dynamo_store.consume_token(session_id)
+    token = dynamo_store.consume_token(session_id)          # primero el token: el segundo clic pierde aquí y no pisa nada
     if not token:
         raise HitlDecisionError(409, "La decisión ya fue enviada")
     try:
+        if not approved:
+            # La razón puede contener datos de un menor: va a S3 (cifrado), NUNCA por Step Functions.
+            phase_store.update_state(session_id, hitl_reason=reason or "")
+        # `running` ANTES de enviar: si fuera después podría pisar el estado terminal que escribe `Finalizar`.
+        dynamo_store.update_session(session_id, phase="running", hitl_data=None)
         sfn_client.send_success(token, {"approved": bool(approved), "agent_to_retry": int(agent_to_retry or 2)})
     except sfn_client.TaskTokenGone:
         dynamo_store.update_session(session_id, phase="error", workflow_status="error", error=_MSG_EXPIRADA, hitl_data=None)
         raise HitlDecisionError(409, "La revisión expiró") from None
-    dynamo_store.update_session(session_id, phase="running", hitl_data=None)
+    except Exception as exc:
+        # Nada llegó a Step Functions: se devuelve el token y la sesión vuelve a esperar para que el docente reintente.
+        logger.error("no se pudo enviar la decisión de %s: %s", session_id, type(exc).__name__)
+        dynamo_store.restore_token(session_id, token)
+        dynamo_store.update_session(session_id, phase="awaiting_hitl", hitl_data=item.get("hitl_data"))
+        raise HitlDecisionError(503, "No se pudo registrar la decisión. Intenta nuevamente.") from None
 
 
 def cancel_session_sfn(session_id: str, item: dict) -> None:

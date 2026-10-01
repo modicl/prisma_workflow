@@ -11,7 +11,7 @@ Seguridad:
   * No registra tokens de tarea, cuerpos ni el token interno.
 
 Para `waitForTaskToken` el valor de retorno se ignora: la tarea termina cuando el workflow llama a SendTaskSuccess.
-Variables: BACKEND_INTERNAL_URL, INTERNAL_TOKEN, API_TIMEOUT (30), RETRY_ATTEMPTS (3)
+Variables: BACKEND_INTERNAL_URL, INTERNAL_TOKEN, API_TIMEOUT (8), RETRY_ATTEMPTS (3)
 """
 import json
 import os
@@ -25,9 +25,14 @@ _UUID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4
 _CLAVES_CUERPO = ("task_token", "attempt", "feedback_agent", "status")
 
 
+# Los endpoints responden de inmediato (202/200): un intento colgado más de 8 s ya falló. 3 x 8 s + esperas de 2 y 4 s = 30 s,
+# que cabe en el timeout de 45 s de la Lambda (con 30 s por intento el segundo reintento era inalcanzable).
+DEFAULT_API_TIMEOUT = "8"
+
+
 def _post(url: str, cuerpo: dict) -> int:
     intentos = int(os.environ.get("RETRY_ATTEMPTS", "3"))
-    espera_http = int(os.environ.get("API_TIMEOUT", "30"))
+    espera_http = int(os.environ.get("API_TIMEOUT", DEFAULT_API_TIMEOUT))
     datos = json.dumps(cuerpo).encode("utf-8")
     ultimo = None
     for intento in range(1, intentos + 1):

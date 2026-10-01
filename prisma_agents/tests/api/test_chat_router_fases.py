@@ -140,6 +140,7 @@ def test_hitl_de_una_sesion_en_memoria_sigue_usando_la_cola(db, wr):
     db.enabled.return_value = True
     SESSIONS["s1"] = SessionData(owner_id="u1")
     SESSIONS["s1"].phase = "awaiting_hitl"
+    SESSIONS["s1"].task = MagicMock()          # el camino antiguo siempre tiene una tarea asyncio propia
     res = client.post("/chat/s1/hitl", json={"approved": True})
     assert res.status_code == 200 and SESSIONS["s1"].hitl_response_queue.qsize() == 1
     wr.submit_hitl_decision.assert_not_called()

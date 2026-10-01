@@ -78,7 +78,8 @@ async def with_heartbeat(token: str, work: Awaitable, interval: float = 30.0):
     """Corre `work` enviando un heartbeat cada `interval` segundos.
 
     Si el heartbeat descubre que el token ya no es válido, CANCELA el trabajo y lanza PhaseAbandoned: nadie está
-    esperando ese resultado y seguir sería gastar llamadas a Gemini.
+    esperando ese resultado y seguir sería gastar llamadas a Gemini. Un error TRANSITORIO del heartbeat (límite de
+    tasa, red) solo se registra: el plazo de Step Functions da margen para varios latidos perdidos.
     """
     tarea = asyncio.ensure_future(work)
     try:
@@ -92,6 +93,8 @@ async def with_heartbeat(token: str, work: Awaitable, interval: float = 30.0):
                 tarea.cancel()
                 await asyncio.gather(tarea, return_exceptions=True)
                 raise PhaseAbandoned("el token de tarea ya no es válido") from e
-    except asyncio.CancelledError:
-        tarea.cancel()
-        raise
+            except Exception as e:                      # noqa: BLE001 — transitorio: se sigue trabajando
+                logger.warning("heartbeat fallido (se reintenta en el próximo latido): %s", type(e).__name__)
+    finally:
+        if not tarea.done():
+            tarea.cancel()

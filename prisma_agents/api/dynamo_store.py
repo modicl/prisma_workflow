@@ -150,11 +150,14 @@ def update_session(session_id: str, **fields) -> None:
         logger.error("DynamoDB error inesperado en update_session %s: %s", session_id, e)
 
 
-def acquire_phase(session_id: str, phase_key: str, ttl_seconds: int = 1800) -> bool:
+def acquire_phase(session_id: str, phase_key: str, ttl_seconds: int = 1800, token: str = "") -> bool:
     """Toma el candado de fase: evita que dos workers corran la misma fase a la vez.
 
     Escritura condicional con vencimiento (`running_until`) para recuperarse de un worker caído.
     Devuelve True si lo obtuvo. Sin DynamoDB (modo local) siempre True.
+
+    `token` identifica al dueño (el token de tarea de Step Functions). Un reintento de Step Functions trae un token NUEVO y
+    puede tomar el candado de un worker caído sin esperar a que venza; un mensaje repetido (mismo token) no.
     """
     if not enabled():
         return True
@@ -163,12 +166,13 @@ def acquire_phase(session_id: str, phase_key: str, ttl_seconds: int = 1800) -> b
         _get_client().update_item(
             TableName=TABLE,
             Key={"session_id": {"S": session_id}},
-            UpdateExpression="SET running_phase = :p, running_until = :u",
-            ConditionExpression="attribute_not_exists(running_until) OR running_until < :now",
+            UpdateExpression="SET running_phase = :p, running_until = :u, running_token = :tok",
+            ConditionExpression="attribute_not_exists(running_until) OR running_until < :now OR running_token <> :tok",
             ExpressionAttributeValues={
                 ":p": {"S": phase_key},
                 ":u": {"N": str(now + ttl_seconds)},
                 ":now": {"N": str(now)},
+                ":tok": {"S": token},
             },
         )
         return True
@@ -178,17 +182,41 @@ def acquire_phase(session_id: str, phase_key: str, ttl_seconds: int = 1800) -> b
         raise
 
 
-def release_phase(session_id: str) -> None:
+def release_phase(session_id: str, token: str = "") -> None:
+    """Libera el candado. Con `token`, solo si sigue siendo el dueño (un worker zombi no borra el de otro)."""
+    if not enabled():
+        return
+    kwargs = {}
+    if token:
+        kwargs = {"ConditionExpression": "running_token = :tok", "ExpressionAttributeValues": {":tok": {"S": token}}}
+    try:
+        _get_client().update_item(
+            TableName=TABLE,
+            Key={"session_id": {"S": session_id}},
+            UpdateExpression="REMOVE running_phase, running_until, running_token",
+            **kwargs,
+        )
+    except ClientError as e:
+        if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
+            logger.error("DynamoDB error en release_phase %s: %s", session_id, e)
+    except Exception as e:
+        logger.error("DynamoDB error inesperado en release_phase %s: %s", session_id, e)
+
+
+def restore_token(session_id: str, token: str) -> None:
+    """Devuelve el token consumido si no se pudo usarlo (SendTaskSuccess falló): el docente puede reintentar."""
     if not enabled():
         return
     try:
         _get_client().update_item(
             TableName=TABLE,
             Key={"session_id": {"S": session_id}},
-            UpdateExpression="REMOVE running_phase, running_until",
+            UpdateExpression="SET task_token = :t",
+            ConditionExpression="attribute_not_exists(task_token) OR task_token = :vacio",
+            ExpressionAttributeValues={":t": {"S": token}, ":vacio": {"S": ""}},
         )
     except Exception as e:
-        logger.error("DynamoDB error inesperado en release_phase %s: %s", session_id, e)
+        logger.error("no se pudo restaurar el token de %s: %s", session_id, type(e).__name__)
 
 
 def consume_token(session_id: str) -> Optional[str]:

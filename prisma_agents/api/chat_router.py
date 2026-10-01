@@ -292,6 +292,15 @@ async def get_state(session_id: str, _user: dict = Depends(get_current_user)):
     }
 
 
+def _usa_step_functions(sd) -> bool:
+    """¿Esta sesión se resuelve por Step Functions (DynamoDB) y no por la cola en memoria?
+
+    /chat/start registra SIEMPRE la sesión en SESSIONS, también cuando el flujo lo orquesta Step Functions; lo que distingue
+    al camino antiguo es que su proceso tiene una tarea asyncio propia (`sd.task`, asignada en start_chat local e internal_run).
+    """
+    return dynamo_store.enabled() and (sd is None or sd.task is None)
+
+
 @router.post(
     "/{session_id}/hitl",
     tags=["HITL"],
@@ -310,7 +319,7 @@ async def get_state(session_id: str, _user: dict = Depends(get_current_user)):
 )
 async def respond_hitl(session_id: str, body: HitlResponseBody, _user: dict = Depends(get_current_user)):
     sd = SESSIONS.get(session_id)
-    if sd is None and dynamo_store.enabled():
+    if _usa_step_functions(sd):
         item = dynamo_store.get_session(session_id)
         if item is not None:
             # Sesión orquestada por Step Functions: no vive en la RAM de este proceso (otra tarea de ECS pudo correr la fase).
@@ -351,7 +360,7 @@ async def respond_hitl(session_id: str, body: HitlResponseBody, _user: dict = De
 )
 async def cancel_session(session_id: str, _user: dict = Depends(get_current_user)):
     sd = SESSIONS.get(session_id)
-    if sd is None and dynamo_store.enabled():
+    if _usa_step_functions(sd):
         item = dynamo_store.get_session(session_id)
         if item is not None:
             _assert_owner(item.get("owner_id"), _user["sub"])
@@ -525,7 +534,7 @@ async def internal_phase(phase: Literal["a", "b"], session_id: str, body: PhaseB
     item = _item_or_404(session_id)
     if phase == "a" and item.get("school_id") == "__mock_dead__":
         return {"started": True}          # simula un worker que no responde: prueba de heartbeat en LocalStack
-    if not dynamo_store.acquire_phase(session_id, f"{phase}:{body.attempt}", PHASE_LOCK_SECONDS):
+    if not dynamo_store.acquire_phase(session_id, f"{phase}:{body.attempt}", PHASE_LOCK_SECONDS, body.task_token):
         return {"started": False}         # otra ejecución de esta fase está en curso (mensaje repetido o heartbeat perdido)
     tarea = asyncio.create_task(
         workflow_runner.run_phase_job(phase, session_id, item, body.task_token, body.attempt, body.feedback_agent)
