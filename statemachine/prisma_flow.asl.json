@@ -1,0 +1,173 @@
+{
+  "Comment": "Flujo PRISMA: fases con espera del docente (HITL) duradera. Por aqui solo viajan ids, numeros y estados: el historial de ejecuciones guarda entradas y salidas 90 dias en claro.",
+  "StartAt": "Iniciar",
+  "States": {
+    "Iniciar": {
+      "Type": "Pass",
+      "Result": { "attempt": 1, "feedback_agent": 0 },
+      "ResultPath": "$.ctx",
+      "Next": "FaseA"
+    },
+    "FaseA": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+        "FunctionName": "${InvokerArn}",
+        "Payload": {
+          "phase": "a",
+          "session_id.$": "$.session_id",
+          "attempt.$": "$.ctx.attempt",
+          "feedback_agent.$": "$.ctx.feedback_agent",
+          "task_token.$": "$$.Task.Token"
+        }
+      },
+      "TimeoutSecondsPath": "$.timeouts.fase",
+      "HeartbeatSecondsPath": "$.timeouts.heartbeat",
+      "ResultPath": "$.fase",
+      "Retry": [
+        { "ErrorEquals": ["States.HeartbeatTimeout"], "IntervalSeconds": 5, "MaxAttempts": 1, "BackoffRate": 1.0 }
+      ],
+      "Catch": [
+        { "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "PrepError" }
+      ],
+      "Next": "RutaFaseA"
+    },
+    "RutaFaseA": {
+      "Type": "Choice",
+      "Choices": [
+        { "Variable": "$.fase.status", "StringEquals": "ok", "Next": "EsperarDocente" }
+      ],
+      "Default": "FinalDesdeFase"
+    },
+    "EsperarDocente": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+        "FunctionName": "${InvokerArn}",
+        "Payload": {
+          "phase": "wait",
+          "session_id.$": "$.session_id",
+          "attempt.$": "$.ctx.attempt",
+          "task_token.$": "$$.Task.Token"
+        }
+      },
+      "TimeoutSecondsPath": "$.timeouts.hitl",
+      "ResultPath": "$.decision",
+      "Catch": [
+        { "ErrorEquals": ["States.Timeout"], "ResultPath": "$.error", "Next": "PrepExpirada" },
+        { "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "PrepError" }
+      ],
+      "Next": "DecidirHitl"
+    },
+    "DecidirHitl": {
+      "Type": "Choice",
+      "Choices": [
+        { "Variable": "$.decision.approved", "BooleanEquals": true, "Next": "FaseB" },
+        {
+          "And": [
+            { "Variable": "$.decision.approved", "BooleanEquals": false },
+            { "Variable": "$.ctx.attempt", "NumericGreaterThanEquals": 3 }
+          ],
+          "Next": "PrepRechazada"
+        }
+      ],
+      "Default": "ProximoIntento"
+    },
+    "ProximoIntento": {
+      "Type": "Pass",
+      "Parameters": {
+        "attempt.$": "States.MathAdd($.ctx.attempt, 1)",
+        "feedback_agent.$": "$.decision.agent_to_retry"
+      },
+      "ResultPath": "$.ctx",
+      "Next": "FaseA"
+    },
+    "FaseB": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+        "FunctionName": "${InvokerArn}",
+        "Payload": {
+          "phase": "b",
+          "session_id.$": "$.session_id",
+          "task_token.$": "$$.Task.Token"
+        }
+      },
+      "TimeoutSecondsPath": "$.timeouts.fase",
+      "HeartbeatSecondsPath": "$.timeouts.heartbeat",
+      "ResultPath": "$.fase",
+      "Retry": [
+        { "ErrorEquals": ["States.HeartbeatTimeout"], "IntervalSeconds": 5, "MaxAttempts": 1, "BackoffRate": 1.0 }
+      ],
+      "Catch": [
+        { "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "PrepError" }
+      ],
+      "Next": "FinalDesdeFase"
+    },
+    "FinalDesdeFase": {
+      "Type": "Pass",
+      "Parameters": { "status.$": "$.fase.status" },
+      "ResultPath": "$.final",
+      "Next": "Finalizar"
+    },
+    "PrepError": {
+      "Type": "Pass",
+      "Result": { "status": "error" },
+      "ResultPath": "$.final",
+      "Next": "Finalizar"
+    },
+    "PrepExpirada": {
+      "Type": "Pass",
+      "Result": { "status": "expired" },
+      "ResultPath": "$.final",
+      "Next": "Finalizar"
+    },
+    "PrepRechazada": {
+      "Type": "Pass",
+      "Result": { "status": "hitl_rejected" },
+      "ResultPath": "$.final",
+      "Next": "Finalizar"
+    },
+    "Finalizar": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${InvokerArn}",
+        "Payload": {
+          "phase": "finalize",
+          "session_id.$": "$.session_id",
+          "status.$": "$.final.status"
+        }
+      },
+      "ResultPath": null,
+      "Retry": [
+        {
+          "ErrorEquals": ["Lambda.ServiceException", "Lambda.AWSLambdaException", "Lambda.SdkClientException", "Lambda.TooManyRequestsException", "States.TaskFailed"],
+          "IntervalSeconds": 3,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Next": "Resultado"
+    },
+    "Resultado": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Or": [
+            { "Variable": "$.final.status", "StringEquals": "error" },
+            { "Variable": "$.final.status", "StringEquals": "timeout" }
+          ],
+          "Next": "Falla"
+        }
+      ],
+      "Default": "Fin"
+    },
+    "Fin": { "Type": "Succeed" },
+    "Falla": {
+      "Type": "Fail",
+      "Error": "FlujoConError",
+      "Cause": "El flujo termino con error o timeout. El detalle esta en la sesion (DynamoDB)."
+    }
+  }
+}
