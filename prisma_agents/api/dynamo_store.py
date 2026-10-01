@@ -23,6 +23,8 @@ _FIELD_TYPES = {
     "docx_s3_key": "S",
     "workflow_status": "S",
     "warnings": "S",
+    "task_token": "S",     # token de Step Functions de la espera del docente
+    "started_at": "S",     # epoch (texto) del inicio del flujo, para medir duración
 }
 _TRANSFORMS = {
     "messages": json.dumps,
@@ -31,6 +33,7 @@ _TRANSFORMS = {
     "docx_s3_key": lambda v: v or "",
     "workflow_status": lambda v: v or "",
     "warnings": json.dumps,
+    "task_token": lambda v: v or "",
 }
 
 
@@ -109,6 +112,8 @@ def get_session(session_id: str) -> Optional[dict]:
         "prompt":          item.get("prompt", {}).get("S", ""),
         "school_id":       item.get("school_id", {}).get("S", ""),
         "owner_id":        item.get("owner_id", {}).get("S") or None,
+        "task_token":      item.get("task_token", {}).get("S") or None,
+        "started_at":      float(item.get("started_at", {}).get("S") or 0) or None,
     }
 
 
@@ -143,3 +148,67 @@ def update_session(session_id: str, **fields) -> None:
             logger.error("DynamoDB error [%s] en update_session %s: %s", code, session_id, e)
     except Exception as e:
         logger.error("DynamoDB error inesperado en update_session %s: %s", session_id, e)
+
+
+def acquire_phase(session_id: str, phase_key: str, ttl_seconds: int = 1800) -> bool:
+    """Toma el candado de fase: evita que dos workers corran la misma fase a la vez.
+
+    Escritura condicional con vencimiento (`running_until`) para recuperarse de un worker caído.
+    Devuelve True si lo obtuvo. Sin DynamoDB (modo local) siempre True.
+    """
+    if not enabled():
+        return True
+    now = int(time.time())
+    try:
+        _get_client().update_item(
+            TableName=TABLE,
+            Key={"session_id": {"S": session_id}},
+            UpdateExpression="SET running_phase = :p, running_until = :u",
+            ConditionExpression="attribute_not_exists(running_until) OR running_until < :now",
+            ExpressionAttributeValues={
+                ":p": {"S": phase_key},
+                ":u": {"N": str(now + ttl_seconds)},
+                ":now": {"N": str(now)},
+            },
+        )
+        return True
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+            return False
+        raise
+
+
+def release_phase(session_id: str) -> None:
+    if not enabled():
+        return
+    try:
+        _get_client().update_item(
+            TableName=TABLE,
+            Key={"session_id": {"S": session_id}},
+            UpdateExpression="REMOVE running_phase, running_until",
+        )
+    except Exception as e:
+        logger.error("DynamoDB error inesperado en release_phase %s: %s", session_id, e)
+
+
+def consume_token(session_id: str) -> Optional[str]:
+    """Lee y BORRA el token de tarea en una sola operación atómica (un solo uso).
+
+    Devuelve None si no había token (por ejemplo, un segundo clic del docente).
+    """
+    if not enabled():
+        return None
+    try:
+        resp = _get_client().update_item(
+            TableName=TABLE,
+            Key={"session_id": {"S": session_id}},
+            UpdateExpression="REMOVE task_token",
+            ConditionExpression="attribute_exists(task_token) AND task_token <> :vacio",
+            ExpressionAttributeValues={":vacio": {"S": ""}},
+            ReturnValues="UPDATED_OLD",
+        )
+        return resp["Attributes"]["task_token"]["S"]
+    except ClientError as e:
+        if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+            return None
+        raise
