@@ -9,6 +9,7 @@ Flujo:
 """
 
 import asyncio
+import contextvars
 import json
 import logging
 import os
@@ -18,6 +19,8 @@ import tempfile
 import boto3
 from botocore.exceptions import ClientError
 from google import genai
+
+from utils.usage_events import emit_direct_usage
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +70,7 @@ def select_materials_with_llm(index: dict, perfil_paci: str) -> list[str]:
         model="gemini-3.1-flash-lite",
         contents=[prompt],
     )
+    emit_direct_usage(response, agent="Selección de materiales", model="gemini-3.1-flash-lite")   # monitor en vivo
     text = response.text.strip()
     match = re.search(r'\{.*?"selected".*?\}', text, re.DOTALL)
     if match:
@@ -134,6 +138,7 @@ def transcribe_material_from_s3(school_id: str, subject: str, grade: str, filena
                     "Preserva la estructura, títulos, ejercicios y ejemplos.",
                 ],
             )
+            emit_direct_usage(response, agent="Transcripción de material", model="gemini-3.1-flash-lite")   # monitor en vivo
             return f"=== {filename} ===\n{response.text}"
         finally:
             if uploaded:
@@ -191,6 +196,8 @@ async def get_reference_materials_async(
 ) -> str:
     """Versión async de get_reference_materials. Corre en executor para no bloquear el event loop."""
     loop = asyncio.get_running_loop()
+    # El executor NO hereda el contexto: se copia para que el monitor pueda atribuir el consumo a la sesión.
+    ctx = contextvars.copy_context()
     return await loop.run_in_executor(
-        None, get_reference_materials, school_id, subject, grade, perfil_paci
+        None, ctx.run, get_reference_materials, school_id, subject, grade, perfil_paci
     )

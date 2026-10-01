@@ -51,6 +51,11 @@ async def lifespan(app: FastAPI):
     setup_tracing()
     yield
     try:
+        from api.event_publisher import shutdown as shutdown_event_publisher
+        await shutdown_event_publisher()
+    except Exception:
+        pass
+    try:
         from langfuse import get_client
         get_client().flush()
     except Exception:

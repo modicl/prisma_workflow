@@ -17,6 +17,7 @@ boto3==1.38.0
 
 # ── Base de datos ─────────────────────────────────────────────────
 asyncpg==0.30.0
+aiokafka==0.14.0            # publicador de eventos hacia Kafka (monitor en vivo); autorizado por el dueño 2026-09-29
 
 # ── Documentos ────────────────────────────────────────────────────
 python-docx==1.2.0

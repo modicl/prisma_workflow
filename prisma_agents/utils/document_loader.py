@@ -19,6 +19,7 @@ from google import genai
 from google.genai import types as genai_types
 
 from utils.text_compactor import compact_text
+from utils.usage_events import emit_direct_usage
 
 
 _PDF_MIME = "application/pdf"
@@ -113,6 +114,7 @@ def _load_pdf_via_gemini(path: Path, label: str | None) -> str:
             except Exception:
                 pass
 
+    emit_direct_usage(response, agent="Lectura de PDF (OCR)", model=_MODEL)   # monitor en vivo
     extracted = response.text
     if not extracted and response.candidates:
         content = response.candidates[0].content
@@ -236,6 +238,7 @@ def _ocr_images_with_gemini(images: list[dict], filename: str) -> str:
         ),
     )
 
+    emit_direct_usage(response, agent="OCR de imágenes DOCX", model=_MODEL)   # monitor en vivo
     extracted = response.text
     if not extracted and response.candidates:
         content = response.candidates[0].content

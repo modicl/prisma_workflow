@@ -1,6 +1,7 @@
 import os
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Awaitable, Callable
 
@@ -12,8 +13,18 @@ from api import dynamo_store
 from api.session_store import SESSIONS, HITL_CALLBACKS, sync_to_dynamo
 from run import run_workflow
 from utils.input_validator import validate_prompt_docente
+from utils.usage_events import monitor_session_id
 
 S3_BUCKET = os.environ.get("S3_BUCKET", "")
+
+
+def _emit(event_type: str, session_id: str, **fields) -> None:
+    """Evento para el monitor en vivo (Kafka). El workflow no depende de Kafka: jamás lanza."""
+    try:
+        from api.event_publisher import publish
+        publish(event_type, session_id, **fields)
+    except Exception:
+        pass
 
 
 def _push_message(session_data: "SessionData", content: str, role: str = "system") -> None:
@@ -71,6 +82,7 @@ def _make_hitl_callback(
             "max_attempts": max_attempts,
             "hitl_data": hitl_data,
         })
+        _emit("hitl_required", session_id, attempt=attempt)
         sync_to_dynamo(session_id, session_data)
 
         response = await session_data.hitl_response_queue.get()
@@ -213,6 +225,9 @@ async def run_workflow_for_api(
 
     hitl_was_rejected = [False]
     HITL_CALLBACKS[session_id] = _make_hitl_callback(session_id, session_data, hitl_was_rejected)
+    flow_started = False       # solo se cierra con flow_finished un flujo que llegó a empezar
+    session_token = None       # para dejar de atribuir consumo a esta sesión al terminar
+    t0 = time.monotonic()
 
     try:
         # Simulación de flujo para pruebas de UX/UI sin consumir tokens LLM
@@ -223,6 +238,11 @@ async def run_workflow_for_api(
 
         _push_message(session_data, "Documentos recibidos. Iniciando análisis del PACI...")
         sync_to_dynamo(session_id, session_data)
+
+        _emit("flow_started", session_id)
+        flow_started = True
+        # Las llamadas directas a Gemini (lectura de PDF, materiales) atribuyen su consumo a esta sesión.
+        session_token = monitor_session_id.set(session_id)
 
         results = await run_workflow(
             paci_path=paci_path,
@@ -250,6 +270,14 @@ async def run_workflow_for_api(
         sync_to_dynamo(session_id, session_data)
 
     finally:
+        if flow_started:
+            _emit(
+                "flow_finished", session_id,
+                status="cancelled" if session_data.cancelled else (session_data.workflow_status or "error"),
+                duration_ms=int((time.monotonic() - t0) * 1000),
+            )
+        if session_token is not None:
+            monitor_session_id.reset(session_token)
         HITL_CALLBACKS.pop(session_id, None)
         while not session_data.hitl_response_queue.empty():
             session_data.hitl_response_queue.get_nowait()

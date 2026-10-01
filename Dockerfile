@@ -21,7 +21,8 @@ RUN apk add --no-cache \
     libffi-dev \
     musl-dev \
     openssl-dev \
-    python3-dev
+    python3-dev \
+    zlib-dev
 
 WORKDIR /app
 

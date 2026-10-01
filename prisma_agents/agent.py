@@ -19,6 +19,7 @@ Flujo:
 import asyncio
 import json
 import re
+import time
 from datetime import date
 
 from google.adk.agents import BaseAgent
@@ -40,6 +41,7 @@ from utils.compliance_gates import (
     interpret_critic_decision,
 )
 from tools.book_repository import get_reference_materials_async
+from utils.usage_events import resolve_model, usage_fields
 
 _genai_client: genai.Client | None = None
 
@@ -72,6 +74,29 @@ def _push_sse_event(state: dict, event_data: dict) -> None:
             sd.event_queue.put_nowait(event_data)
     except ImportError:
         pass
+
+
+def _emit_monitor_event(state: dict, event_type: str, **fields) -> None:
+    """Publica un evento al monitor en vivo (Kafka). No-op en CLI (sin api_session_id). Nunca lanza."""
+    session_id = state.get("api_session_id", "")
+    if not session_id:
+        return
+    try:
+        from api.event_publisher import publish
+        publish(event_type, session_id, **fields)
+    except Exception:
+        pass
+
+
+def _usage_fields(event, agent, label: str) -> dict | None:
+    """Campos de un evento `llm_usage` a partir del usage_metadata de ADK, o None si no aplica.
+
+    Los eventos parciales se ignoran para no contar dos veces el mismo consumo. `prompt_token_count`
+    ya incluye los tokens servidos desde caché (`cached_content_token_count` es un subconjunto).
+    """
+    modelo = resolve_model(getattr(event, "model_version", None), str(getattr(agent, "model", "") or ""))
+    return usage_fields(getattr(event, "usage_metadata", None), modelo, label,
+                        partial=bool(getattr(event, "partial", False)))
 
 
 def _get_genai_client() -> genai.Client:
@@ -225,16 +250,22 @@ async def _run_with_timeout(agent, ctx: InvocationContext, label: str) -> AsyncG
         "agent": label,
         "message": _get_sse_message(label),
     })
+    _emit_monitor_event(ctx.session.state, "agent_started", agent=label)
+    t0 = time.monotonic()
     for attempt in range(1, MAX_RETRIES_ON_TIMEOUT + 2):  # +2: intento original + reintentos
         timed_out = False
         server_error = False
         try:
             async with asyncio.timeout(AGENT_TIMEOUT_SECONDS):
                 async for event in agent.run_async(ctx):
+                    usage = _usage_fields(event, agent, label)
+                    if usage:
+                        _emit_monitor_event(ctx.session.state, "llm_usage", **usage)
                     yield event
         except TimeoutError:
             timed_out = True
             if attempt <= MAX_RETRIES_ON_TIMEOUT:
+                _emit_monitor_event(ctx.session.state, "agent_retry", agent=label, attempt=attempt, reason="timeout")
                 print(
                     f"\n⏱ TIMEOUT: {label} superó {AGENT_TIMEOUT_SECONDS}s "
                     f"(intento {attempt}/{MAX_RETRIES_ON_TIMEOUT + 1}). "
@@ -251,6 +282,7 @@ async def _run_with_timeout(agent, ctx: InvocationContext, label: str) -> AsyncG
             if exc.code == 503 and attempt <= len(_503_RETRY_DELAYS):
                 delay = _503_RETRY_DELAYS[attempt - 1]
                 server_error = True
+                _emit_monitor_event(ctx.session.state, "agent_retry", agent=label, attempt=attempt, reason="503")
                 print(
                     f"\n🔄 503 UNAVAILABLE: {label} (intento {attempt}/{len(_503_RETRY_DELAYS) + 1}). "
                     f"Gemini con alta demanda — reintentando en {delay}s...\n"
@@ -261,9 +293,13 @@ async def _run_with_timeout(agent, ctx: InvocationContext, label: str) -> AsyncG
 
         if not timed_out and not server_error:
             _push_sse_event(ctx.session.state, {"type": "agent_end", "agent": label})
+            _emit_monitor_event(ctx.session.state, "agent_finished", agent=label,
+                                duration_ms=int((time.monotonic() - t0) * 1000), ok=True)
             return  # completó exitosamente, salir del loop de reintentos
 
     _push_sse_event(ctx.session.state, {"type": "agent_end", "agent": label})
+    _emit_monitor_event(ctx.session.state, "agent_finished", agent=label,
+                        duration_ms=int((time.monotonic() - t0) * 1000), ok=False)
 
 
 class PaciWorkflowAgent(BaseAgent):

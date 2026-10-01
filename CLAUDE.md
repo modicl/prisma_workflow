@@ -61,7 +61,9 @@ PostgreSQL (BD_LOGS):
   → Tracking de tokens por agente/sesión (dashboard.py, sql/views.sql)
 ```
 
-**Modelo LLM:** `gemini-2.5-flash-lite` (todos los agentes)  
+**Modelo LLM:** `gemini-3.1-flash-lite` (todos los agentes; verificado en `agents/*.py` el 2026-09-29 — las menciones a `2.5` más abajo están desactualizadas)  
+**Monitor en vivo:** `api/event_publisher.py` publica eventos a Kafka (opcional; ver `../CLAUDE.md §15`). No depende de él.  
+**Ojo:** `token_tracker.py` y `dashboard.py` que se mencionan abajo **no existen** en el repo; las vistas de `sql/views.sql` leen la tabla `events` de ADK (requiere `BD_LOGS`).  
 **SDK:** `google-adk==1.28.0`, `google-genai==1.70.0`
 
 ---
