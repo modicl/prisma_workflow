@@ -89,7 +89,10 @@ prisma_workflow/
 │   │   ├── main.py              # App FastAPI — carga .env, monta routers
 │   │   ├── chat_router.py       # Endpoints públicos /chat/* e interno /internal/run
 │   │   ├── session_store.py     # SessionData en memoria + HITL_CALLBACKS registry
-│   │   ├── workflow_runner.py   # Puente FastAPI ↔ PaciWorkflowAgent (descarga S3, HITL callback)
+│   │   ├── workflow_runner.py   # Puente FastAPI ↔ PaciWorkflowAgent (descarga S3, HITL callback) + fases A/B de Step Functions
+│   │   ├── phase_store.py       # Estado entre fases en S3 (state/{id}.json, cifrado, lista explícita de claves)
+│   │   ├── sfn_client.py        # SendTask*/StopExecution y heartbeat que cancela la fase si el token se pierde
+│   │   ├── mock_phases.py       # Fases simuladas (school_id __mock_*) para probar sin Gemini
 │   │   ├── dynamo_store.py      # Wrapper DynamoDB (create/get/update)
 │   │   └── server.py            # Uvicorn runner alternativo
 │   │
@@ -97,6 +100,7 @@ prisma_workflow/
 │   │   └── book_repository.py   # Acceso S3 materiales del colegio — solo lectura
 │   │
 │   ├── utils/
+│   │   ├── hitl_feedback.py     # Textos de retroalimentación del docente (extraídos de agent.py, sin cambios)
 │   │   ├── document_loader.py   # Carga PDF (Gemini OCR), DOCX (XML), JSON → texto
 │   │   ├── document_exporter.py # Genera el .docx de salida
 │   │   ├── curriculum_catalog.py # ⚠️ Normaliza ramo/curso desde texto libre español
@@ -130,7 +134,12 @@ prisma_workflow/
 │   └── package.json
 │
 ├── lambda/
-│   └── trigger_handler.py       # ⚠️ Lambda standalone — stdlib Python puro, sin dependencias externas
+│   ├── trigger_handler.py       # ⚠️ Lambda standalone — stdlib Python puro, sin dependencias externas
+│   ├── sfn_starter.py           # Lambda SQS → StartExecution (fuera de la VPC; idempotente por session_id)
+│   └── sfn_invoker.py           # Lambda Step Functions → ALB (en la VPC; solo HTTP stdlib, lista blanca de fases)
+│
+├── statemachine/
+│   └── prisma_flow.asl.json     # Máquina de estados (JSONPath); único marcador: ${InvokerArn}
 │
 ├── docs/                        # PDFs legales de referencia
 │   ├── DTO-170_21-ABR-2010.pdf  # ⚠️ Decreto 170 — fuente normativa
@@ -261,6 +270,11 @@ Sin estas claves el sistema funciona normalmente — el tracing simplemente no s
 - **DECISIÓN:** Orquestador custom (`PaciWorkflowAgent(BaseAgent)`) en lugar de `SequentialAgent`/`LoopAgent` de ADK — **RAZÓN:** los loops HITL y de crítico requieren lógica condicional, reintentos y comunicación inter-agente que `SequentialAgent` no soporta nativamente — **IMPLICACIÓN:** no refactorizar a agentes ADK declarativos sin reimplementar toda la lógica de estado; el estado viaja en `ctx.session.state` como dict mutable.
 
 - **DECISIÓN:** Comunicación HITL vía `asyncio.Queue` (`sd.hitl_response_queue`) en modo API — **RAZÓN:** el agente corre en una corutina de background y necesita suspenderse hasta recibir la respuesta del docente sin bloquear el event loop — **IMPLICACIÓN:** nunca reemplazar la Queue por polling a BD; el callback en `HITL_CALLBACKS[session_id]` debe existir antes de que el agente llegue al checkpoint.
+
+> ⚠️ **Actualizado el 2026-10-01 (rama `cloudnative`).** Con Step Functions la espera del docente ya no vive en un proceso: la sostiene
+> `waitForTaskToken` (el token se guarda en DynamoDB y `POST /hitl` hace `SendTaskSuccess`). **No es polling a BD.** La `asyncio.Queue`
+> sigue siendo el camino del modo local sin AWS y del CLI. `POST /chat/:id/hitl` elige el camino según la sesión: si está en `SESSIONS`
+> (camino antiguo) usa la cola; si solo existe en DynamoDB (Step Functions) usa el token. Ver `docs/superpowers/specs/2026-10-01-sqs-stepfunctions-design.md`.
 
 - **DECISIÓN:** DynamoDB como store de estado + dict en memoria — **RAZÓN:** el polling del frontend (`GET /state` cada 2s) debe ser fast sin depender de que el proceso del agente esté vivo; DynamoDB permite que el frontend lea estado incluso si el backend reinicia — **IMPLICACIÓN:** siempre escribir a DynamoDB **antes** de cambiar estado en memoria cuando el orden importa (ej. crear sesión en Dynamo antes del PUT a S3 en `/chat/start`).
 
