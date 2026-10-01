@@ -208,6 +208,58 @@ async def run_workflow(paci_path: str, material_path: str, prompt: str = "", use
     return results
 
 
+async def run_phase(phase: str, state: dict, *, user_id: str, api_session_id: str) -> dict:
+    """Corre UNA fase ('a' o 'b') del flujo a partir de un estado dado y devuelve el estado resultante.
+
+    A diferencia de run_workflow no carga documentos ni exporta el DOCX: el estado viaja por S3 entre fases
+    (api/phase_store.py). Cada fase usa una sesión ADK nueva e independiente: con BD_LOGS configurado, el id de la
+    sesión ADK lleva el sufijo de la fase para no chocar (el estado `api_session_id` sigue siendo el de la API).
+    """
+    from agent import root_agent_fase_a, root_agent_fase_b
+    from api.phase_store import STATE_KEYS
+
+    raiz = {"a": root_agent_fase_a, "b": root_agent_fase_b}[phase]
+    db_url = os.environ.get("BD_LOGS")
+    session_service = DatabaseSessionService(db_url=db_url) if db_url else InMemorySessionService()
+
+    inicial = {
+        "critica_previa": "", "hitl_feedback_a1": "", "hitl_feedback_a2": "", "materiales_referencia": "",
+        **state,
+        "api_session_id": api_session_id,
+    }
+    session = await session_service.create_session(
+        app_name=APP_NAME,
+        user_id=user_id,
+        session_id=f"{api_session_id}-{phase}-{uuid.uuid4().hex[:8]}",
+        state=inicial,
+    )
+    runner = Runner(agent=raiz, session_service=session_service, app_name=APP_NAME, plugins=[LoggingPlugin()])
+    mensaje = state.get("prompt_docente") or "Inicia el flujo PACI con los documentos proporcionados."
+
+    from langfuse import get_client, propagate_attributes
+    nombre = f"paci-workflow-fase-{phase}"
+    with get_client().start_as_current_observation(name=nombre):
+        with propagate_attributes(
+            user_id=user_id,
+            session_id=api_session_id,
+            trace_name=nombre,
+            metadata={
+                "school_id": state.get("school_id") or "sin_colegio",
+                "channel": "api",
+                "fase": phase,
+                "env": os.environ.get("ENV", "dev"),
+            },
+            tags=["api", f"fase:{phase}"],
+        ):
+            async for _evento in runner.run_async(
+                user_id=user_id, session_id=session.id, new_message=Content(parts=[Part(text=mensaje)])
+            ):
+                pass
+            final = await session_service.get_session(app_name=APP_NAME, user_id=user_id, session_id=session.id)
+
+    return {**state, **{k: final.state[k] for k in STATE_KEYS if k in final.state}}
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 3:
         print("Uso: python run.py <paci_path> <material_path> [prompt_adicional] [user_id] [school_id]")

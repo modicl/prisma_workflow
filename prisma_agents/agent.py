@@ -42,6 +42,7 @@ from utils.compliance_gates import (
 )
 from tools.book_repository import get_reference_materials_async
 from utils.usage_events import resolve_model, usage_fields
+from utils.hitl_feedback import feedback_a1, feedback_a2
 
 _genai_client: genai.Client | None = None
 
@@ -302,6 +303,14 @@ async def _run_with_timeout(agent, ctx: InvocationContext, label: str) -> AsyncG
                         duration_ms=int((time.monotonic() - t0) * 1000), ok=False)
 
 
+# Estados que detienen el flujo antes del bucle HITL (los dos los escribe el propio orquestador).
+_ESTADOS_QUE_DETIENEN = ("timeout", "validation_failed")
+
+# Claves de control que deben quedar en el estado persistido de ADK al terminar una FASE. Lo que se escribe directo en
+# `ctx.session.state` no sobrevive al get_session(); solo viaja lo que va en el state_delta de un Event.
+_CLAVES_ENTRE_FASES = ("materiales_referencia", "status", "warnings", "validation_code", "validation_reason")
+
+
 class PaciWorkflowAgent(BaseAgent):
     """Coordinador secuencial del flujo PACI con loop de revisión de rúbrica."""
 
@@ -311,8 +320,12 @@ class PaciWorkflowAgent(BaseAgent):
     adaptador_agent: LlmAgent | None = None
     generador_rubrica_agent: LlmAgent | None = None
     critico_agent: LlmAgent | None = None
+    # "all": flujo completo (CLI y modo local) · "a": Agente 1 + gate + materiales + Agente 2 · "b": Generador + Crítico
+    phase: str = "all"
 
-    def __init__(self):
+    def __init__(self, phase: str = "all"):
+        if phase not in ("all", "a", "b"):
+            raise ValueError(f"fase desconocida: {phase!r} (use 'all', 'a' o 'b')")
         _analizador = make_analizador_paci_agent()
         _adaptador = make_adaptador_agent()
         _generador = make_generador_rubrica_agent()
@@ -328,6 +341,7 @@ class PaciWorkflowAgent(BaseAgent):
             adaptador_agent=_adaptador,
             generador_rubrica_agent=_generador,
             critico_agent=_critico,
+            phase=phase,
         )
 
     def _commit_state(self, ctx: InvocationContext, **delta) -> Event:
@@ -341,10 +355,8 @@ class PaciWorkflowAgent(BaseAgent):
         ctx.session.state.update(delta)
         return Event(author=self.name, actions=EventActions(state_delta=delta))
 
-    async def _run_async_impl(
-        self, ctx: InvocationContext
-    ) -> AsyncGenerator[Event, None]:
-
+    async def _analisis_inicial(self, ctx: InvocationContext) -> AsyncGenerator[Event, None]:
+        """Agente 1 + gate de compliance + materiales de referencia (todo lo que va antes del bucle HITL)."""
         # ── Agente 1: Análisis inicial del PACI ──────────────────────────────
         print("\n[Agente 1] Analizando PACI...\n")
         async for event in _run_with_timeout(self.analizador_paci_agent, ctx, "Agente 1"):
@@ -410,52 +422,8 @@ class PaciWorkflowAgent(BaseAgent):
 
         ctx.session.state["materiales_referencia"] = materiales_texto
 
-        # ── Loop HITL: Agente 2 + aprobación del profesor ────────────────────
-        for hitl_attempt in range(1, MAX_HITL_ITERATIONS + 1):
-            print("\n[Agente 2] Adaptando material educativo...\n")
-            async for event in _run_with_timeout(self.adaptador_agent, ctx, "Agente 2"):
-                yield event
-            if ctx.session.state.get("status") == "timeout":
-                return
-
-            aprobado, razon, agente = await _hitl_checkpoint(
-                ctx.session.state, attempt=hitl_attempt, max_attempts=MAX_HITL_ITERATIONS
-            )
-
-            if aprobado:
-                break
-
-            # Intentos agotados — cancela el flujo
-            # agente == 0: camino CLI (última iteración retorna 0 explícitamente)
-            # hitl_attempt == MAX_HITL_ITERATIONS: camino API (agent_to_retry siempre 1 o 2)
-            if agente == 0 or hitl_attempt == MAX_HITL_ITERATIONS:
-                ctx.session.state["status"] = "hitl_rejected"
-                return
-
-            # Inyectar feedback según el agente elegido por el profesor
-            if agente == 1:
-                ctx.session.state["hitl_feedback_a1"] = (
-                    f"\nRETROALIMENTACIÓN DEL DOCENTE — Debes revisar tu análisis "
-                    f"considerando el siguiente problema señalado:\n"
-                    f"\"{razon}\"\n"
-                    f"Ajusta tu respuesta para abordar específicamente este punto."
-                )
-                ctx.session.state["hitl_feedback_a2"] = ""
-                print("\n[Agente 1] Re-analizando PACI con feedback del docente...\n")
-                async for event in _run_with_timeout(self.analizador_paci_agent, ctx, "Agente 1 (retry)"):
-                    yield event
-                if ctx.session.state.get("status") == "timeout":
-                    return
-            else:  # agente == 2
-                ctx.session.state["hitl_feedback_a1"] = ""   # limpia feedback previo de a1
-                ctx.session.state["hitl_feedback_a2"] = (
-                    f"\nRETROALIMENTACIÓN DEL DOCENTE — Debes revisar la adaptación "
-                    f"considerando el siguiente problema señalado:\n"
-                    f"\"{razon}\"\n"
-                    f"Ajusta tu respuesta para abordar específicamente este punto."
-                )
-
-        # ── Loop: Generador de Rúbrica + Agente Crítico ───────────────────────
+    async def _fase_b(self, ctx: InvocationContext) -> AsyncGenerator[Event, None]:
+        """Bucle Generador de Rúbrica + Agente Crítico (después de la aprobación del docente)."""
         for iteration in range(1, MAX_ITERATIONS + 1):
             print(f"\n[Agente 3 — Iteración {iteration}/{MAX_ITERATIONS}] Generando rúbrica...\n")
             async for event in _run_with_timeout(self.generador_rubrica_agent, ctx, f"Agente 3 (it.{iteration})"):
@@ -506,6 +474,83 @@ class PaciWorkflowAgent(BaseAgent):
                 print("\n⚠ Máximo de iteraciones alcanzado. Se entrega la última versión generada.\n")
                 yield self._commit_state(ctx, status="fail")
 
+    async def _orquestar(self, ctx: InvocationContext) -> AsyncGenerator[Event, None]:
+        if self.phase == "b":
+            async for event in self._fase_b(ctx):
+                yield event
+            return
+
+        # En la fase "a", `retry_agent` (lo fija workflow_runner desde la decisión del docente) dice qué repetir:
+        # 0 = intento inicial · 1 = reanalizar (Agente 1) y adaptar · 2 = solo volver a adaptar.
+        retry = ctx.session.state.get("retry_agent", 0) if self.phase == "a" else 0
+
+        if retry == 0:
+            async for event in self._analisis_inicial(ctx):
+                yield event
+            if ctx.session.state.get("status") in _ESTADOS_QUE_DETIENEN:
+                return
+        elif retry == 1:
+            async for event in _run_with_timeout(self.analizador_paci_agent, ctx, "Agente 1 (retry)"):
+                yield event
+            if ctx.session.state.get("status") == "timeout":
+                return
+
+        if self.phase == "a":
+            print("\n[Agente 2] Adaptando material educativo...\n")
+            async for event in _run_with_timeout(self.adaptador_agent, ctx, "Agente 2"):
+                yield event
+            return          # el docente revisa fuera de este proceso (Step Functions); no hay checkpoint aquí
+
+        # ── phase == "all": Loop HITL — Agente 2 + aprobación del profesor (en memoria, como siempre) ──
+        for hitl_attempt in range(1, MAX_HITL_ITERATIONS + 1):
+            print("\n[Agente 2] Adaptando material educativo...\n")
+            async for event in _run_with_timeout(self.adaptador_agent, ctx, "Agente 2"):
+                yield event
+            if ctx.session.state.get("status") == "timeout":
+                return
+
+            aprobado, razon, agente = await _hitl_checkpoint(
+                ctx.session.state, attempt=hitl_attempt, max_attempts=MAX_HITL_ITERATIONS
+            )
+
+            if aprobado:
+                break
+
+            # Intentos agotados — cancela el flujo
+            # agente == 0: camino CLI (última iteración retorna 0 explícitamente)
+            # hitl_attempt == MAX_HITL_ITERATIONS: camino API (agent_to_retry siempre 1 o 2)
+            if agente == 0 or hitl_attempt == MAX_HITL_ITERATIONS:
+                ctx.session.state["status"] = "hitl_rejected"
+                return
+
+            # Inyectar feedback según el agente elegido por el profesor
+            if agente == 1:
+                ctx.session.state["hitl_feedback_a1"] = feedback_a1(razon)
+                ctx.session.state["hitl_feedback_a2"] = ""
+                print("\n[Agente 1] Re-analizando PACI con feedback del docente...\n")
+                async for event in _run_with_timeout(self.analizador_paci_agent, ctx, "Agente 1 (retry)"):
+                    yield event
+                if ctx.session.state.get("status") == "timeout":
+                    return
+            else:  # agente == 2
+                ctx.session.state["hitl_feedback_a1"] = ""   # limpia feedback previo de a1
+                ctx.session.state["hitl_feedback_a2"] = feedback_a2(razon)
+
+        async for event in self._fase_b(ctx):
+            yield event
+
+    async def _run_async_impl(
+        self, ctx: InvocationContext
+    ) -> AsyncGenerator[Event, None]:
+        async for event in self._orquestar(ctx):
+            yield event
+        if self.phase != "all":
+            # Cada fase corre en una sesión ADK propia y nueva: lo que se escribió directo en ctx.session.state
+            # (materiales, status de timeout) se pierde salvo que viaje en un state_delta.
+            yield self._commit_state(
+                ctx, **{k: ctx.session.state[k] for k in _CLAVES_ENTRE_FASES if k in ctx.session.state}
+            )
+
 
 def _parse_critic_json(raw) -> dict:
     """Parsea la respuesta del Agente Crítico. ADK puede entregar dict o JSON string según output_schema."""
@@ -526,4 +571,6 @@ def _parse_critic_json(raw) -> dict:
         }
 
 
-root_agent = PaciWorkflowAgent()
+root_agent = PaciWorkflowAgent()                       # flujo completo: CLI y modo local
+root_agent_fase_a = PaciWorkflowAgent(phase="a")       # Step Functions: Agente 1 + gate + materiales + Agente 2
+root_agent_fase_b = PaciWorkflowAgent(phase="b")       # Step Functions: Generador + Crítico
