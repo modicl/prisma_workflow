@@ -168,3 +168,9 @@ def test_finalizar_libera_el_cupo(libera):
 def test_cancelar_libera_el_cupo(libera):
     wr.cancel_session_sfn("s1", {"owner_id": "u1"})
     libera.assert_called_once_with("u1", "s1")
+
+
+def test_las_sesiones_de_ms_docs_exponen_user_id_como_owner_id(cli):
+    """ms-docs guarda `user_id`; sin esto el cupo no se libera y la comprobación de dueño de /hitl era permisiva."""
+    cli.get_item.return_value = {"Item": {"session_id": {"S": "s1"}, "phase": {"S": "running"}, "user_id": {"S": "u1"}}}
+    assert dynamo_store.get_session("s1")["owner_id"] == "u1"

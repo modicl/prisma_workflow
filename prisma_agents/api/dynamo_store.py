@@ -111,7 +111,8 @@ def get_session(session_id: str) -> Optional[dict]:
         "material_s3_key": item.get("material_s3_key", {}).get("S", ""),
         "prompt":          item.get("prompt", {}).get("S", ""),
         "school_id":       item.get("school_id", {}).get("S", ""),
-        "owner_id":        item.get("owner_id", {}).get("S") or None,
+        # ms-docs guarda `user_id` (mismo valor: el `sub` de Cognito); /chat/start guarda `owner_id`.
+        "owner_id":        item.get("owner_id", {}).get("S") or item.get("user_id", {}).get("S") or None,
         "task_token":      item.get("task_token", {}).get("S") or None,
         "started_at":      float(item.get("started_at", {}).get("S") or 0) or None,
     }
