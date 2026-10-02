@@ -175,24 +175,6 @@ def test_internal_run_starts_workflow():
 
 # ── /start endpoint ───────────────────────────────────────────────────────────
 
-def test_start_local_creates_session():
-    from io import BytesIO
-    with patch("api.chat_router.S3_BUCKET", ""), \
-         patch("api.chat_router.run_workflow_for_api", return_value=None):
-        res = client.post(
-            "/chat/start",
-            files={
-                "paci_file": ("paci.pdf", BytesIO(b"%PDF content"), "application/pdf"),
-                "material_file": ("mat.docx", BytesIO(b"PK content"), "application/vnd.openxmlformats"),
-            },
-            data={"prompt": "", "school_id": "colegio_demo"},
-        )
-    assert res.status_code == 201
-    sid = res.json()["session_id"]
-    assert sid
-    SESSIONS.pop(sid, None)
-
-
 # ── SSE /stream endpoint ──────────────────────────────────────────────────────
 
 def test_stream_session_not_found():
@@ -333,66 +315,6 @@ def test_cancel_running_session_with_task():
     assert res.status_code == 200
     mock_task.cancel.assert_called_once()
     del SESSIONS[sid]
-
-
-def test_start_s3_path_creates_session():
-    from io import BytesIO
-    mock_s3 = MagicMock()
-    with patch("api.chat_router.S3_BUCKET", "my-bucket"), \
-         patch("api.chat_router.boto3.client", return_value=mock_s3), \
-         patch("api.dynamo_store.create_session"):
-        res = client.post(
-            "/chat/start",
-            files={
-                "paci_file": ("paci.pdf", BytesIO(b"%PDF content"), "application/pdf"),
-                "material_file": ("mat.docx", BytesIO(b"PK content"), "application/octet-stream"),
-            },
-            data={"prompt": "", "school_id": "colegio_demo"},
-        )
-    assert res.status_code == 201
-    assert "session_id" in res.json()
-    SESSIONS.pop(res.json()["session_id"], None)
-
-
-def test_start_s3_upload_error_returns_500():
-    from io import BytesIO
-    mock_s3 = MagicMock()
-    mock_s3.put_object.side_effect = Exception("S3 unavailable")
-    with patch("api.chat_router.S3_BUCKET", "my-bucket"), \
-         patch("api.chat_router.boto3.client", return_value=mock_s3), \
-         patch("api.dynamo_store.create_session"):
-        res = client.post(
-            "/chat/start",
-            files={
-                "paci_file": ("paci.pdf", BytesIO(b"%PDF"), "application/pdf"),
-                "material_file": ("mat.docx", BytesIO(b"PK"), "application/octet-stream"),
-            },
-            data={"prompt": "", "school_id": "demo"},
-        )
-    assert res.status_code == 500
-
-
-def test_safe_ext_none_filename():
-    """Cubre line 40: _safe_ext cuando filename es None devuelve el default."""
-    from api.chat_router import _safe_ext
-    assert _safe_ext(None, ".pdf") == ".pdf"
-    assert _safe_ext("", ".docx") == ".docx"
-
-
-def test_start_local_write_error_returns_500():
-    """Cubre lines 111-115: error al escribir los archivos en disco."""
-    from io import BytesIO
-    with patch("api.chat_router.S3_BUCKET", ""), \
-         patch("pathlib.Path.write_bytes", side_effect=OSError("disk full")):
-        res = client.post(
-            "/chat/start",
-            files={
-                "paci_file": ("paci.pdf", BytesIO(b"%PDF"), "application/pdf"),
-                "material_file": ("mat.docx", BytesIO(b"PK"), "application/octet-stream"),
-            },
-            data={"prompt": "", "school_id": "demo"},
-        )
-    assert res.status_code == 500
 
 
 def test_stream_waits_for_session_when_dynamo_enabled():

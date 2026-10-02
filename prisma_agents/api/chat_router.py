@@ -2,15 +2,13 @@ import asyncio
 import json
 import logging
 import os
-import tempfile
-import uuid
 from pathlib import Path
 from typing import Literal, Optional
 
 logger = logging.getLogger(__name__)
 
 import boto3
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Header, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Header
 from fastapi.responses import FileResponse, StreamingResponse
 
 from api import dynamo_store, workflow_runner
@@ -23,7 +21,6 @@ from api.schemas import (
     OkResponse,
     PhaseBody,
     SessionStateResponse,
-    StartChatResponse,
 )
 from api.session_store import SESSIONS, SessionData, sync_to_dynamo
 from api.workflow_runner import run_workflow_for_api
@@ -41,118 +38,11 @@ def _assert_owner(owner_id: Optional[str], user_sub: str) -> None:
         raise HTTPException(status_code=403, detail="No tienes acceso a esta sesión")
 
 
-# Local dev upload dir (used only when S3_BUCKET is not configured)
-UPLOAD_DIR = Path(tempfile.gettempdir()) / "prisma_uploads"
-UPLOAD_DIR.mkdir(exist_ok=True)
-
 S3_BUCKET = os.environ.get("S3_BUCKET", "")
 INTERNAL_TOKEN = os.environ.get("INTERNAL_TOKEN", "")
 
-_ALLOWED_EXTENSIONS = {".pdf", ".docx", ".doc"}
-
-
-def _safe_ext(filename: str | None, default: str) -> str:
-    if not filename:
-        return default
-    suffix = Path(filename).suffix.lower()
-    return suffix if suffix in _ALLOWED_EXTENSIONS else default
-
 
 # ── Public endpoints ──────────────────────────────────────────────────────────
-
-@router.post(
-    "/start",
-    tags=["Chat"],
-    summary="Registrar sesión y subir documentos",
-    description=(
-        "Sube el PACI y el material base e inicia el workflow de generación de rúbrica.\n\n"
-        "**Modo producción (S3_BUCKET configurado):** los archivos se suben a S3, se crea "
-        "la sesión en DynamoDB y la Lambda `prisma-trigger` dispara `/internal/run`.\n\n"
-        "**Modo dev local (S3_BUCKET vacío):** los archivos se guardan en disco y el "
-        "workflow se lanza como BackgroundTask directamente."
-    ),
-    response_model=StartChatResponse,
-    status_code=201,
-    responses={
-        400: {"description": "Extensión de archivo no soportada (.doc no está permitido directamente)"},
-        500: {"description": "Error al guardar archivos en disco o subir a S3"},
-    },
-)
-async def start_chat(
-    paci_file: UploadFile = File(..., description="Documento PACI del estudiante (.pdf o .docx)"),
-    material_file: UploadFile = File(..., description="Material educativo base (.pdf o .docx)"),
-    prompt: str = Form("", description="Instrucciones adicionales del docente para el flujo"),
-    school_id: str = Form("colegio_demo", description="ID del colegio para acceder al repositorio S3 de materiales"),
-    _user: dict = Depends(get_current_user),
-):
-    session_id = str(uuid.uuid4())
-    paci_ext = _safe_ext(paci_file.filename, ".pdf")
-    material_ext = _safe_ext(material_file.filename, ".docx")
-
-    paci_bytes = await paci_file.read()
-    material_bytes = await material_file.read()
-
-    owner_sub = _user["sub"]
-
-    # Un solo flujo activo por docente: se reserva el cupo ANTES de crear nada (DynamoDB: atómico; sin DynamoDB: sesiones en memoria).
-    if dynamo_store.enabled():
-        libre, activa = dynamo_store.acquire_user_slot(owner_sub, session_id)
-    else:
-        activa = next((sid for sid, s in SESSIONS.items() if s.owner_id == owner_sub and s.phase not in ("completed", "error")), None)
-        libre = activa is None
-    if not libre:
-        raise HTTPException(status_code=409, detail={"code": "flow_in_progress", "message": "Ya tienes un flujo en acción", "session_id": activa})
-
-    SESSIONS[session_id] = SessionData(owner_id=owner_sub)
-
-    if S3_BUCKET:
-        # Event-driven path: upload to S3, Lambda will call /internal/run
-        paci_s3_key = f"jobs/{session_id}/paci{paci_ext}"
-        material_s3_key = f"jobs/{session_id}/material{material_ext}"
-        # Write to DynamoDB BEFORE uploading to S3 — Lambda fires on the first PUT
-        # and must find the session record already in DynamoDB.
-        dynamo_store.create_session(
-            session_id,
-            phase="running",
-            paci_s3_key=paci_s3_key,
-            material_s3_key=material_s3_key,
-            prompt=prompt,
-            school_id=school_id,
-            owner_id=owner_sub,
-        )
-        try:
-            s3 = boto3.client("s3")
-            s3.put_object(Bucket=S3_BUCKET, Key=paci_s3_key, Body=paci_bytes)
-            s3.put_object(Bucket=S3_BUCKET, Key=material_s3_key, Body=material_bytes)
-        except Exception as exc:
-            SESSIONS.pop(session_id, None)
-            dynamo_store.release_user_slot(owner_sub, session_id)
-            logger.error("S3 upload failed for session %s: %s", session_id, exc)
-            raise HTTPException(status_code=500, detail="Error al subir archivos. Intente nuevamente.")
-    else:
-        # Local dev path: save to disk, launch background task directly
-        paci_path = UPLOAD_DIR / f"{session_id}_paci{paci_ext}"
-        material_path = UPLOAD_DIR / f"{session_id}_material{material_ext}"
-        try:
-            paci_path.write_bytes(paci_bytes)
-            material_path.write_bytes(material_bytes)
-        except Exception:
-            paci_path.unlink(missing_ok=True)
-            material_path.unlink(missing_ok=True)
-            SESSIONS.pop(session_id, None)
-            dynamo_store.release_user_slot(owner_sub, session_id)
-            raise HTTPException(status_code=500, detail="Error al guardar los archivos subidos")
-        task = asyncio.create_task(run_workflow_for_api(
-            session_id=session_id,
-            paci_path=str(paci_path),
-            material_path=str(material_path),
-            prompt=prompt,
-            school_id=school_id,
-        ))
-        SESSIONS[session_id].task = task
-
-    return {"session_id": session_id}
-
 
 @router.get(
     "/{session_id}/stream",

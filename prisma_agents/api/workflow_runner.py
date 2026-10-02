@@ -237,12 +237,6 @@ async def run_workflow_for_api(
     t0 = time.monotonic()
 
     try:
-        # Simulación de flujo para pruebas de UX/UI sin consumir tokens LLM
-        if school_id and school_id.startswith("__mock"):
-            from api.mock_runner import run_mock_workflow
-            await run_mock_workflow(session_id, session_data, school_id)
-            return
-
         _push_message(session_data, "Documentos recibidos. Iniciando análisis del PACI...")
         sync_to_dynamo(session_id, session_data)
 

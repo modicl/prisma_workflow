@@ -135,18 +135,6 @@ async def test_si_falla_antes_de_empezar_no_hay_flow_finished(rec):
 
 
 @pytest.mark.asyncio
-async def test_las_sesiones_mock_no_publican_nada(rec):
-    _sesion()
-
-    async def mock_runner(session_id, session_data, school_id):
-        session_data.phase = "completed"
-
-    with patch("api.mock_runner.run_mock_workflow", side_effect=mock_runner):
-        await workflow_runner.run_workflow_for_api("sesion-1", paci_path="/a", material_path="/b", school_id="__mock_ok")
-    assert rec.calls == []
-
-
-@pytest.mark.asyncio
 async def test_hitl_required_se_publica_con_el_numero_de_intento(rec):
     sd = _sesion()
     cb = workflow_runner._make_hitl_callback("sesion-1", sd, [False])

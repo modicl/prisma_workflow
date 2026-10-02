@@ -111,7 +111,7 @@ def get_session(session_id: str) -> Optional[dict]:
         "material_s3_key": item.get("material_s3_key", {}).get("S", ""),
         "prompt":          item.get("prompt", {}).get("S", ""),
         "school_id":       item.get("school_id", {}).get("S", ""),
-        # ms-docs guarda `user_id` (mismo valor: el `sub` de Cognito); /chat/start guarda `owner_id`.
+        # ms-docs guarda `user_id` (mismo valor: el `sub` de Cognito); las sesiones antiguas guardaban `owner_id`.
         "owner_id":        item.get("owner_id", {}).get("S") or item.get("user_id", {}).get("S") or None,
         "task_token":      item.get("task_token", {}).get("S") or None,
         "started_at":      float(item.get("started_at", {}).get("S") or 0) or None,
@@ -244,41 +244,14 @@ def consume_token(session_id: str) -> Optional[str]:
 
 
 # ── Un solo flujo activo por docente ────────────────────────────────────────────────────────────────────────
-# El cupo es un registro `user#{owner_id}` en la misma tabla, escrito con condición: dos subidas simultáneas no pasan las dos.
+# El cupo es un registro `user#{owner_id}` en la misma tabla. Lo RESERVA ms-docs al subir (escritura condicional: dos subidas
+# simultáneas no pasan las dos) y el workflow solo lo LIBERA cuando el flujo termina.
 # Vence solo (active_until) para que un flujo atascado no bloquee al docente; el TTL de DynamoDB limpia el registro después.
 USER_SLOT_SECONDS = 600
 
 
 def _slot_key(owner_id: str) -> dict:
     return {"session_id": {"S": f"user#{owner_id}"}}
-
-
-def acquire_user_slot(owner_id: str, session_id: str, ttl_seconds: int = USER_SLOT_SECONDS) -> tuple:
-    """Reserva el único cupo de flujo del docente. Devuelve (True, None) o (False, session_id_activa)."""
-    if not enabled():
-        return True, None
-    now = int(time.time())
-    try:
-        _get_client().put_item(
-            TableName=TABLE,
-            Item={
-                **_slot_key(owner_id),
-                "active_session": {"S": session_id},
-                "active_until": {"N": str(now + ttl_seconds)},
-                "expires_at": {"N": str(now + ttl_seconds + 3600)},
-            },
-            ConditionExpression="attribute_not_exists(session_id) OR active_until < :now",
-            ExpressionAttributeValues={":now": {"N": str(now)}},
-        )
-        return True, None
-    except ClientError as e:
-        if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
-            raise
-    try:
-        item = _get_client().get_item(TableName=TABLE, Key=_slot_key(owner_id)).get("Item") or {}
-    except Exception:
-        item = {}
-    return False, item.get("active_session", {}).get("S")
 
 
 def release_user_slot(owner_id: str, session_id: str) -> None:

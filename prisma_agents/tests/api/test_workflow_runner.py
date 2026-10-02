@@ -112,21 +112,6 @@ class TestRunWorkflowForApi:
         assert sd.workflow_status == "error"
         assert "Prompt inválido" in sd.error
 
-    def test_mock_school_id_routes_to_mock_runner(self):
-        sid = "test-mock-route"
-        _make_session(sid)
-
-        async def fake_mock(session_id, session_data, school_id):
-            session_data.phase = "completed"
-            session_data.workflow_status = "success"
-
-        async def _go():
-            with patch("api.mock_runner.run_mock_workflow", side_effect=fake_mock):
-                await workflow_runner.run_workflow_for_api(sid, school_id="__mock_fast__")
-
-        self._run(_go())
-        assert SESSIONS[sid].phase == "completed"
-
     def test_successful_workflow_sets_completed(self):
         sid = "test-wf-success"
         sd = _make_session(sid)
