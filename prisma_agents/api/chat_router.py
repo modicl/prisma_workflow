@@ -319,7 +319,11 @@ async def download_result(session_id: str, _user: dict = Depends(get_current_use
         _assert_owner(item.get("owner_id"), _user["sub"])
         if item.get("phase") != "completed" or not item.get("docx_s3_key"):
             raise HTTPException(status_code=404, detail="Resultado no disponible aún")
-        s3 = boto3.client("s3", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+        # Solo desarrollo local: LocalStack se alcanza internamente como `localstack:4566`, un nombre que el navegador del docente
+        # no resuelve. Con S3_PUBLIC_ENDPOINT_URL la URL se firma con una dirección alcanzable (p. ej. http://localhost:4566).
+        # En AWS real la variable no existe y el cliente se crea como siempre.
+        extra = {"endpoint_url": os.environ["S3_PUBLIC_ENDPOINT_URL"]} if os.environ.get("S3_PUBLIC_ENDPOINT_URL") else {}
+        s3 = boto3.client("s3", region_name=os.environ.get("AWS_REGION", "us-east-1"), **extra)
         filename = Path(item["docx_s3_key"]).name
         presigned_url = s3.generate_presigned_url(
             "get_object",

@@ -294,6 +294,33 @@ def test_download_dynamo_presigned_url():
     assert "presigned" in data["url"]
 
 
+def _descarga_dynamo(monkeypatch, **env):
+    """Pide /download de una sesión completada y devuelve los kwargs con que se creó el cliente S3 que firma la URL."""
+    for k in ("S3_PUBLIC_ENDPOINT_URL",):
+        monkeypatch.delenv(k, raising=False)
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    item = {"phase": "completed", "docx_s3_key": "results/sess/rubrica.docx", "owner_id": None}
+    mock_s3 = MagicMock()
+    mock_s3.generate_presigned_url.return_value = "http://x/firma"
+    with patch("api.dynamo_store.enabled", return_value=True),          patch("api.dynamo_store.get_session", return_value=item),          patch("api.chat_router.S3_BUCKET", "my-bucket"),          patch("api.chat_router.boto3.client", return_value=mock_s3) as fabrica:
+        res = client.get("/chat/sess-s3/download")
+    assert res.status_code == 200
+    return fabrica.call_args
+
+
+def test_download_firma_con_la_direccion_publica_si_esta_definida(monkeypatch):
+    """Solo local: el navegador no resuelve `localstack:4566`, así que la URL se firma con una dirección alcanzable."""
+    llamada = _descarga_dynamo(monkeypatch, S3_PUBLIC_ENDPOINT_URL="http://localhost:4566")
+    assert llamada.kwargs["endpoint_url"] == "http://localhost:4566"
+
+
+def test_download_sin_direccion_publica_no_cambia_el_cliente(monkeypatch):
+    """En AWS real la variable no existe: el cliente se crea exactamente como antes."""
+    llamada = _descarga_dynamo(monkeypatch)
+    assert "endpoint_url" not in llamada.kwargs
+
+
 def test_download_dynamo_not_completed_returns_404():
     dynamo_item = {"phase": "running", "docx_s3_key": ""}
     with patch("api.dynamo_store.enabled", return_value=True), \
