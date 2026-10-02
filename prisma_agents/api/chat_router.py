@@ -93,6 +93,16 @@ async def start_chat(
     material_bytes = await material_file.read()
 
     owner_sub = _user["sub"]
+
+    # Un solo flujo activo por docente: se reserva el cupo ANTES de crear nada (DynamoDB: atómico; sin DynamoDB: sesiones en memoria).
+    if dynamo_store.enabled():
+        libre, activa = dynamo_store.acquire_user_slot(owner_sub, session_id)
+    else:
+        activa = next((sid for sid, s in SESSIONS.items() if s.owner_id == owner_sub and s.phase not in ("completed", "error")), None)
+        libre = activa is None
+    if not libre:
+        raise HTTPException(status_code=409, detail={"code": "flow_in_progress", "message": "Ya tienes un flujo en acción", "session_id": activa})
+
     SESSIONS[session_id] = SessionData(owner_id=owner_sub)
 
     if S3_BUCKET:
@@ -116,6 +126,7 @@ async def start_chat(
             s3.put_object(Bucket=S3_BUCKET, Key=material_s3_key, Body=material_bytes)
         except Exception as exc:
             SESSIONS.pop(session_id, None)
+            dynamo_store.release_user_slot(owner_sub, session_id)
             logger.error("S3 upload failed for session %s: %s", session_id, exc)
             raise HTTPException(status_code=500, detail="Error al subir archivos. Intente nuevamente.")
     else:
@@ -129,6 +140,7 @@ async def start_chat(
             paci_path.unlink(missing_ok=True)
             material_path.unlink(missing_ok=True)
             SESSIONS.pop(session_id, None)
+            dynamo_store.release_user_slot(owner_sub, session_id)
             raise HTTPException(status_code=500, detail="Error al guardar los archivos subidos")
         task = asyncio.create_task(run_workflow_for_api(
             session_id=session_id,
@@ -492,7 +504,7 @@ async def internal_run(
 
 
 # ── Fases (Step Functions): las llama la Lambda `invoker` ────────────────────────────────────────────────
-PHASE_LOCK_SECONDS = int(os.environ.get("PHASE_LOCK_SECONDS", "1800"))
+PHASE_LOCK_SECONDS = int(os.environ.get("PHASE_LOCK_SECONDS", "360"))
 _BACKGROUND: set = set()          # referencias a las tareas en segundo plano (si no, el recolector puede cancelarlas)
 
 

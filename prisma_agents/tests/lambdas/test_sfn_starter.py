@@ -33,7 +33,7 @@ def test_el_paci_arranca_la_ejecucion_nombrada_con_el_session_id(sfn):
     assert res == {"batchItemFailures": []}
     kw = sfn.start_execution.call_args.kwargs
     assert kw["name"] == SID and kw["stateMachineArn"].endswith("stateMachine:prisma-flujo")
-    assert json.loads(kw["input"]) == {"session_id": SID, "timeouts": {"fase": 1800, "heartbeat": 120, "hitl": 86400}}
+    assert json.loads(kw["input"]) == {"session_id": SID, "timeouts": {"fase": 300, "heartbeat": 120, "hitl": 480}}
 
 
 def test_acepta_paci_docx_y_claves_url_encoded(sfn):

@@ -11,7 +11,7 @@ Cadena:  S3 PUT jobs/{id}/paci.* -> SQS -> esta Lambda -> máquina de estados `p
 * ReportBatchItemFailures: solo vuelven a la cola los mensajes que fallaron.
 * No registra el contenido de los mensajes.
 
-Variables: STATE_MACHINE_ARN (requerida), FASE_TIMEOUT_SECONDS (1800), HEARTBEAT_SECONDS (120), HITL_TIMEOUT_SECONDS (86400)
+Variables: STATE_MACHINE_ARN (requerida), FASE_TIMEOUT_SECONDS (300), HEARTBEAT_SECONDS (120), HITL_TIMEOUT_SECONDS (480)
 """
 import json
 import os
@@ -36,9 +36,9 @@ def _client():
 
 def _timeouts() -> dict:
     return {
-        "fase": int(os.environ.get("FASE_TIMEOUT_SECONDS", "1800")),
+        "fase": int(os.environ.get("FASE_TIMEOUT_SECONDS", "300")),
         "heartbeat": int(os.environ.get("HEARTBEAT_SECONDS", "120")),
-        "hitl": int(os.environ.get("HITL_TIMEOUT_SECONDS", "86400")),
+        "hitl": int(os.environ.get("HITL_TIMEOUT_SECONDS", "480")),
     }
 
 

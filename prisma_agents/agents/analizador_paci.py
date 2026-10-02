@@ -1,7 +1,7 @@
 from google.adk.agents.llm_agent import LlmAgent
 from google.genai import types as genai_types
 
-MODEL = "gemini-3.1-flash-lite"
+MODEL = "gemini-3.5-flash-lite"
 
 INSTRUCTION = """Eres un especialista en educación diferencial chilena con profundo conocimiento del \
 Decreto 170/2010 (Necesidades Educativas Especiales) y el Decreto 83/2015 \

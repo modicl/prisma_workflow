@@ -1,7 +1,7 @@
 from google.adk.agents.llm_agent import LlmAgent
 from google.genai import types as genai_types
 
-MODEL = "gemini-3.1-flash-lite"
+MODEL = "gemini-3.5-flash-lite"
 
 INSTRUCTION = """Eres un especialista en diseño curricular y adaptación de materiales educativos \
 para estudiantes con Necesidades Educativas Especiales (NEE) en el sistema escolar chileno, \

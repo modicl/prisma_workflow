@@ -2,7 +2,7 @@ from google.adk.agents.llm_agent import LlmAgent
 from google.genai import types as genai_types
 from pydantic import BaseModel
 
-MODEL = "gemini-3.1-flash-lite"
+MODEL = "gemini-3.5-flash-lite"
 
 
 class CriticoResponse(BaseModel):

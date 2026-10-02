@@ -96,7 +96,7 @@ def get_session(session_id: str) -> Optional[dict]:
         logger.error("DynamoDB error inesperado en get_session %s: %s", session_id, e)
         return None
     item = resp.get("Item")
-    if not item:
+    if not item or "phase" not in item:                 # los registros de cupo (`user#...`) no son sesiones
         return None
     return {
         "session_id":      item["session_id"]["S"],
@@ -240,3 +240,59 @@ def consume_token(session_id: str) -> Optional[str]:
         if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
             return None
         raise
+
+
+# ── Un solo flujo activo por docente ────────────────────────────────────────────────────────────────────────
+# El cupo es un registro `user#{owner_id}` en la misma tabla, escrito con condición: dos subidas simultáneas no pasan las dos.
+# Vence solo (active_until) para que un flujo atascado no bloquee al docente; el TTL de DynamoDB limpia el registro después.
+USER_SLOT_SECONDS = 600
+
+
+def _slot_key(owner_id: str) -> dict:
+    return {"session_id": {"S": f"user#{owner_id}"}}
+
+
+def acquire_user_slot(owner_id: str, session_id: str, ttl_seconds: int = USER_SLOT_SECONDS) -> tuple:
+    """Reserva el único cupo de flujo del docente. Devuelve (True, None) o (False, session_id_activa)."""
+    if not enabled():
+        return True, None
+    now = int(time.time())
+    try:
+        _get_client().put_item(
+            TableName=TABLE,
+            Item={
+                **_slot_key(owner_id),
+                "active_session": {"S": session_id},
+                "active_until": {"N": str(now + ttl_seconds)},
+                "expires_at": {"N": str(now + ttl_seconds + 3600)},
+            },
+            ConditionExpression="attribute_not_exists(session_id) OR active_until < :now",
+            ExpressionAttributeValues={":now": {"N": str(now)}},
+        )
+        return True, None
+    except ClientError as e:
+        if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
+            raise
+    try:
+        item = _get_client().get_item(TableName=TABLE, Key=_slot_key(owner_id)).get("Item") or {}
+    except Exception:
+        item = {}
+    return False, item.get("active_session", {}).get("S")
+
+
+def release_user_slot(owner_id: str, session_id: str) -> None:
+    """Libera el cupo, pero solo si sigue siendo de esa sesión (no borra el de un flujo posterior)."""
+    if not enabled() or not owner_id:
+        return
+    try:
+        _get_client().delete_item(
+            TableName=TABLE,
+            Key=_slot_key(owner_id),
+            ConditionExpression="active_session = :sid",
+            ExpressionAttributeValues={":sid": {"S": session_id}},
+        )
+    except ClientError as e:
+        if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
+            logger.error("DynamoDB error en release_user_slot %s: %s", session_id, e)
+    except Exception as e:
+        logger.error("DynamoDB error inesperado en release_user_slot %s: %s", session_id, e)

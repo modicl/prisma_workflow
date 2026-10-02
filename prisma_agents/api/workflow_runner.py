@@ -507,6 +507,7 @@ def finalize_session(session_id: str, item: dict, status: str) -> None:
     elif status in ("error", "timeout") and item.get("phase") not in ("completed", "error"):
         dynamo_store.update_session(session_id, phase="error", workflow_status="error", error=_MSG_ERROR, hitl_data=None, task_token="")
     phase_store.delete_state(session_id)
+    dynamo_store.release_user_slot(item.get("owner_id") or "", session_id)
     emit_flow_finished(session_id, item, status)
 
 
@@ -526,6 +527,7 @@ def submit_hitl_decision(session_id: str, item: dict, approved: bool, reason: st
         sfn_client.send_success(token, {"approved": bool(approved), "agent_to_retry": int(agent_to_retry or 2)})
     except sfn_client.TaskTokenGone:
         dynamo_store.update_session(session_id, phase="error", workflow_status="error", error=_MSG_EXPIRADA, hitl_data=None)
+        dynamo_store.release_user_slot(item.get("owner_id") or "", session_id)
         raise HitlDecisionError(409, "La revisión expiró") from None
     except Exception as exc:
         # Nada llegó a Step Functions: se devuelve el token y la sesión vuelve a esperar para que el docente reintente.
@@ -543,4 +545,5 @@ def cancel_session_sfn(session_id: str, item: dict) -> None:
     except Exception as exc:
         logger.warning("no se pudo detener la ejecución de %s: %s", session_id, type(exc).__name__)
     phase_store.delete_state(session_id)
+    dynamo_store.release_user_slot(item.get("owner_id") or "", session_id)
     emit_flow_finished(session_id, item, "cancelled")

@@ -40,3 +40,5 @@ def sync_to_dynamo(session_id: str, session_data: SessionData, **extra) -> None:
         warnings=session_data.warnings,
         **extra,
     )
+    if session_data.phase in ("completed", "error") and session_data.owner_id:
+        dynamo_store.release_user_slot(session_data.owner_id, session_id)      # un solo flujo por docente: se libera el cupo
