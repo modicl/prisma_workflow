@@ -1,0 +1,23 @@
+[
+  {"pregunta": "¿Qué es el Diseño Universal de Aprendizaje y cómo se aplica en el aula?", "doc": "83", "esperado": "dise[ñn]o universal"},
+  {"pregunta": "¿Qué son las adecuaciones curriculares de acceso?", "doc": "83", "esperado": "adecuaciones curriculares de acceso|de acceso"},
+  {"pregunta": "¿Qué son las adecuaciones curriculares en los objetivos de aprendizaje?", "doc": "83", "esperado": "objetivos de aprendizaje"},
+  {"pregunta": "¿Qué es el PACI y qué debe contener?", "doc": "83|PIE|D170", "esperado": "plan de adecuaciones curriculares individuales|PACI"},
+  {"pregunta": "evaluación diferenciada para estudiantes con necesidades educativas especiales", "doc": "67", "esperado": "diversific|diferenciad"},
+  {"pregunta": "¿Cómo se califican y promueven los estudiantes con necesidades educativas especiales?", "doc": "67", "esperado": "necesidades educativas especiales"},
+  {"pregunta": "¿Qué debe contener el reglamento de evaluación del establecimiento?", "doc": "67|Reglamento", "esperado": "reglamento"},
+  {"pregunta": "¿Quiénes realizan la evaluación diagnóstica integral?", "doc": "170", "esperado": "evaluaci[óo]n diagn[óo]stica integral|evaluaci[óo]n integral"},
+  {"pregunta": "reevaluación y vigencia del diagnóstico de NEE", "doc": "170|PIE|D170", "esperado": "reevaluaci[óo]n|revaluaci[óo]n"},
+  {"pregunta": "definición de necesidades educativas especiales transitorias", "doc": "170", "esperado": "transitoria"},
+  {"pregunta": "definición de necesidades educativas especiales permanentes", "doc": "170", "esperado": "permanente"},
+  {"pregunta": "horas de apoyo de profesionales en el Programa de Integración Escolar", "doc": "170|PIE", "esperado": "horas"},
+  {"pregunta": "estrategias para docentes que enseñan a estudiantes con trastorno del espectro autista", "doc": "autista|TEA|PAEC", "esperado": "espectro autista|autism"},
+  {"pregunta": "ley de inclusión escolar y no discriminación en los establecimientos", "doc": "20.845|20.609", "esperado": "inclusi[óo]n|discriminaci[óo]n"},
+  {"pregunta": "igualdad de oportunidades e inclusión social de las personas con discapacidad", "doc": "20.422", "esperado": "igualdad de oportunidades"},
+  {"pregunta": "contar números del 0 al 1 000 de 5 en 5 en tercero básico", "doc": "Matem.*3", "esperado": "1 000|1000"},
+  {"pregunta": "trabajo colaborativo entre el docente y el profesional de apoyo", "doc": "Cartilla 2|colaborativ", "esperado": "colaborativ"},
+  {"pregunta": "qué debe incluir el informe de evaluación psicopedagógica", "doc": "Cartilla 4|psicopedag", "esperado": "psicopedag"},
+  {"pregunta": "diversificación de la enseñanza en escuelas multigrado", "doc": "multigrado", "esperado": "multigrado"},
+  {"pregunta": "plan de acompañamiento emocional y conductual", "doc": "PAEC", "esperado": "acompa[ñn]amiento"},
+  {"pregunta": "evaluación formativa y retroalimentación según el Decreto 67", "doc": "Fundamentos|67", "esperado": "formativa|retroalimentaci[óo]n"}
+]

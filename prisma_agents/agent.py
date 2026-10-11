@@ -41,6 +41,7 @@ from utils.compliance_gates import (
     interpret_critic_decision,
 )
 from tools.book_repository import get_reference_materials_async
+from rag.retriever import normativa_para_adaptador, normativa_para_evaluacion
 from utils.usage_events import resolve_model, usage_fields
 from utils.hitl_feedback import feedback_a1, feedback_a2
 
@@ -141,6 +142,31 @@ def _extract_metadatos(perfil_paci: str) -> dict[str, str]:
         "motivo": motivo_match.group(1).strip() if motivo_match else "",
         "pii_detectado": "---PII_DETECTADO---" in perfil_paci,
     }
+
+
+def _resolver_ramo_curso(state) -> tuple[str | None, str | None]:
+    """Ramo y curso canónicos: del PACI; si faltan, del prompt del docente; y si siguen faltando, del material base."""
+    perfil_paci = state.get("perfil_paci", "")
+    prompt_docente = state.get("prompt_docente", "")
+    subject_raw, grade_raw = _extract_subject_grade(perfil_paci)
+    subject = normalize_subject(subject_raw) if subject_raw else None
+    grade = normalize_grade(grade_raw) if grade_raw else None
+
+    # Fallback: si el PACI no dio ramo o curso, intentar desde el prompt del docente
+    if not subject and prompt_docente:
+        subject = normalize_subject(prompt_docente)
+    if not grade and prompt_docente:
+        grade = normalize_grade(prompt_docente)
+
+    # Fallback: si sigue sin ramo o curso (ej. PACI dice "Todas las asignaturas"),
+    # inferir desde el material_document sin costo extra de tokens
+    if not subject or not grade:
+        material_doc = state.get("material_document", "")
+        if not subject:
+            subject = normalize_subject(material_doc)
+        if not grade:
+            grade = normalize_grade(material_doc)
+    return subject, grade
 
 
 _CLASSIFY_PROMPT = (
@@ -308,7 +334,8 @@ _ESTADOS_QUE_DETIENEN = ("timeout", "validation_failed")
 
 # Claves de control que deben quedar en el estado persistido de ADK al terminar una FASE. Lo que se escribe directo en
 # `ctx.session.state` no sobrevive al get_session(); solo viaja lo que va en el state_delta de un Event.
-_CLAVES_ENTRE_FASES = ("materiales_referencia", "status", "warnings", "validation_code", "validation_reason")
+_CLAVES_ENTRE_FASES = ("materiales_referencia", "normativa_adaptador", "normativa_evaluacion",
+                       "status", "warnings", "validation_code", "validation_reason")
 
 
 class PaciWorkflowAgent(BaseAgent):
@@ -381,26 +408,8 @@ class PaciWorkflowAgent(BaseAgent):
 
         # ── Book Repository: materiales de referencia del establecimiento ────
         perfil_paci = ctx.session.state.get("perfil_paci", "")
-        prompt_docente = ctx.session.state.get("prompt_docente", "")
-        subject_raw, grade_raw = _extract_subject_grade(perfil_paci)
         school_id = ctx.session.state.get("school_id", "")
-        subject = normalize_subject(subject_raw) if subject_raw else None
-        grade = normalize_grade(grade_raw) if grade_raw else None
-
-        # Fallback: si el PACI no dio ramo o curso, intentar desde el prompt del docente
-        if not subject and prompt_docente:
-            subject = normalize_subject(prompt_docente)
-        if not grade and prompt_docente:
-            grade = normalize_grade(prompt_docente)
-
-        # Fallback: si sigue sin ramo o curso (ej. PACI dice "Todas las asignaturas"),
-        # inferir desde el material_document sin costo extra de tokens
-        if not subject or not grade:
-            material_doc = ctx.session.state.get("material_document", "")
-            if not subject:
-                subject = normalize_subject(material_doc)
-            if not grade:
-                grade = normalize_grade(material_doc)
+        subject, grade = _resolver_ramo_curso(ctx.session.state)
 
         materiales_texto = ""
         if school_id and subject and grade:
@@ -422,8 +431,20 @@ class PaciWorkflowAgent(BaseAgent):
 
         ctx.session.state["materiales_referencia"] = materiales_texto
 
+        # ── RAG normativo (D83, D170, DUA, orientaciones, OA del curso) para el Agente 2 ─────────────
+        # Solo viajan asignatura, curso y etiquetas de NEE: ningún dato identificable. Nunca lanza.
+        ctx.session.state["normativa_adaptador"] = await normativa_para_adaptador(
+            subject or "", grade or "", meta.get("diagnostico", "")
+        )
+
     async def _fase_b(self, ctx: InvocationContext) -> AsyncGenerator[Event, None]:
         """Bucle Generador de Rúbrica + Agente Crítico (después de la aprobación del docente)."""
+        # ── RAG normativo (D67 y evaluación) para el Generador de Rúbrica ───────────────────────────
+        if not ctx.session.state.get("normativa_evaluacion"):
+            subject, grade = _resolver_ramo_curso(ctx.session.state)
+            diagnostico = _extract_metadatos(ctx.session.state.get("perfil_paci", "")).get("diagnostico", "")
+            ctx.session.state["normativa_evaluacion"] = await normativa_para_evaluacion(subject or "", grade or "", diagnostico)
+
         for iteration in range(1, MAX_ITERATIONS + 1):
             print(f"\n[Agente 3 — Iteración {iteration}/{MAX_ITERATIONS}] Generando rúbrica...\n")
             async for event in _run_with_timeout(self.generador_rubrica_agent, ctx, f"Agente 3 (it.{iteration})"):
@@ -475,6 +496,10 @@ class PaciWorkflowAgent(BaseAgent):
                 yield self._commit_state(ctx, status="fail")
 
     async def _orquestar(self, ctx: InvocationContext) -> AsyncGenerator[Event, None]:
+        # Los prompts de los agentes usan estas claves: deben existir siempre, incluso en un estado guardado antes del despliegue.
+        ctx.session.state.setdefault("normativa_adaptador", "")
+        ctx.session.state.setdefault("normativa_evaluacion", "")
+
         if self.phase == "b":
             async for event in self._fase_b(ctx):
                 yield event

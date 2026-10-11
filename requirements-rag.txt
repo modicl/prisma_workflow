@@ -1,0 +1,3 @@
+# Herramientas de la ingesta del RAG (python -m rag.ingest). NO van en la imagen del workflow.
+pypdfium2>=4.30
+beautifulsoup4>=4.12

@@ -27,7 +27,8 @@ STATE_KEYS = (
     # salidas de los agentes
     "perfil_paci", "planificacion_adaptada", "rubrica", "evaluacion_critica",
     # control entre fases
-    "materiales_referencia", "hitl_feedback_a1", "hitl_feedback_a2", "hitl_reason", "critica_previa",
+    "materiales_referencia", "normativa_adaptador", "normativa_evaluacion",
+    "hitl_feedback_a1", "hitl_feedback_a2", "hitl_reason", "critica_previa",
     "status", "warnings", "validation_code", "validation_reason",
 )
 

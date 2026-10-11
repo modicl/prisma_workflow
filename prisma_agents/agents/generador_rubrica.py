@@ -71,6 +71,8 @@ Se te proporciona:
 
 {materiales_referencia}
 
+{normativa_evaluacion}
+
 Tu tarea es generar una rúbrica de evaluación adaptada:
 
 ## Requisitos de la Rúbrica

@@ -475,3 +475,28 @@ Los diagnósticos en el sistema tienen consecuencias legales y educativas reales
 1. No hacer el cambio
 2. Reportarlo al responsable del proyecto
 3. Consultar la fuente normativa en `docs/`
+
+---
+
+## 11. RAG normativo (pgvector) — 2026-10-08
+
+El Agente 2 (adaptador) y el Generador de Rúbrica reciben fragmentos oficiales del Mineduc (Decretos 83, 170 y 67,
+orientaciones DUA/PIE, Bases Curriculares) recuperados desde una base vectorial. Diseño: `docs/superpowers/specs/2026-10-08-rag-normativo-design.md`
+(repo raíz `prisma-aws`).
+
+- **Código:** `prisma_agents/rag/` (`ingest.py`, `retriever.py`, `query.py`, `store.py`, `chunking.py`, `embedder.py`, `evaluar.py`).
+- **Base:** `prisma_rag` en el RDS (pgvector 0.8.x), una conexión por consulta. Variable `RAG_DATABASE_URL`; **vacía ⇒ RAG apagado**.
+- **Puntos de inyección:** `agent.py` — Fase A (`normativa_adaptador`, junto a `materiales_referencia`) y Fase B (`normativa_evaluacion`, al
+  inicio de `_fase_b`). Ambas claves viajan entre fases (`_CLAVES_ENTRE_FASES` y `phase_store.STATE_KEYS`) y los prompts las usan como
+  `{normativa_adaptador}` / `{normativa_evaluacion}`.
+- **Reglas que no se rompen:**
+  1. **El RAG nunca tumba el flujo:** cualquier falla, resultado vacío o tiempo > 10 s ⇒ cadena vacía y un warning (sin contenido) en el log.
+  2. **La consulta no lleva datos identificables:** solo asignatura, curso y etiquetas de NEE de una lista cerrada (`rag/query.py`). Nunca nombre, RUT ni texto libre del PACI.
+  3. **Nunca se indexan PACI ni datos de estudiantes.** El corpus es solo documentación pública.
+  4. Los fragmentos se entregan dentro de `<documento_usuario tipo="normativa_referencia">` y se neutraliza un `</documento_usuario>` dentro del texto.
+  5. `rag/` no importa `agent.py` (evita ciclos); `agent.py` importa solo `rag.retriever`.
+- **Embeddings:** `gemini-embedding-001`, 768 dimensiones, detrás de la interfaz `Embedder`. Cada fila guarda modelo y versión: cambiar de modelo = reindexar (`python -m rag.ingest --forzar`).
+- **Ingesta manual:** `cd prisma_agents && python -m rag.ingest` (necesita `RAG_DATABASE_URL`, `GOOGLE_API_KEY` y `pip install -r requirements-rag.txt`). Idempotente por `sha256`.
+- **Calidad:** `python -m rag.evaluar` mide recall@5 contra `rag/eval_set.json`; el criterio es ≥ 80 %.
+- **Pruebas:** necesitan Postgres con pgvector (`docker compose up -d rag-db` en la raíz) y `RAG_TEST_DATABASE_URL` apuntando a `prisma_rag_test`; sin ella esas pruebas se saltan.
+- **Los prompts `agents/adaptador.py` y `agents/generador_rubrica.py` ganaron un placeholder cada uno** (cambio mínimo revisado por el dueño).

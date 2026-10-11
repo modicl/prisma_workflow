@@ -86,6 +86,8 @@ Se te proporciona:
 {prompt_docente}
 </documento_usuario>
 
+{normativa_adaptador}
+
 Tu tarea es adaptar el material educativo al perfil del estudiante:
 
 ## 1. Múltiples Medios de Representación

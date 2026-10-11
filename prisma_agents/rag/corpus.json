@@ -1,0 +1,269 @@
+{
+  "curriculo_ciclos": [
+    "1o-6o-basico",
+    "7o-basico-2o-medio",
+    "3o-4o-medio"
+  ],
+  "documentos": [
+    {
+      "url": "https://especial.mineduc.cl/wp-content/uploads/sites/31/2016/08/Decreto-83-2015.pdf",
+      "tipo_documento": "norma",
+      "formato": "pdf",
+      "titulo": "Decreto 83/2015",
+      "decreto": "D83",
+      "anio": 2015
+    },
+    {
+      "url": "https://especial.mineduc.cl/wp-content/uploads/sites/31/2018/06/DTO-170_21-ABR-2010.pdf",
+      "tipo_documento": "norma",
+      "formato": "pdf",
+      "titulo": "Decreto 170/2010",
+      "decreto": "D170",
+      "anio": 2010
+    },
+    {
+      "url": "https://especial.mineduc.cl/wp-content/uploads/sites/31/2020/08/Decreto-67_31-DIC-2018.pdf",
+      "tipo_documento": "norma",
+      "formato": "pdf",
+      "titulo": "Decreto 67/2018",
+      "decreto": "D67",
+      "anio": 2018
+    },
+    {
+      "url": "https://especial.mineduc.cl/wp-content/uploads/sites/31/2018/06/DTO-1_11-FEB-2000.pdf",
+      "tipo_documento": "norma",
+      "formato": "pdf",
+      "titulo": "Decreto 1/1998",
+      "decreto": "D1",
+      "anio": 1998
+    },
+    {
+      "url": "https://especial.mineduc.cl/wp-content/uploads/sites/31/2016/08/DECRETON332.pdf",
+      "tipo_documento": "norma",
+      "formato": "pdf",
+      "titulo": "Decreto 332/2011",
+      "decreto": "D332",
+      "anio": 2011
+    },
+    {
+      "url": "https://especial.mineduc.cl/wp-content/uploads/sites/31/2016/08/201304231710590.DecretoN1300.pdf",
+      "tipo_documento": "norma",
+      "formato": "pdf",
+      "titulo": "Decreto 1300/2002",
+      "decreto": "D1300",
+      "anio": 2002
+    },
+    {
+      "url": "https://especial.mineduc.cl/wp-content/uploads/sites/31/2016/03/Decreto-Nº-363.pdf",
+      "tipo_documento": "norma",
+      "formato": "pdf",
+      "titulo": "Decreto 363/1994",
+      "decreto": "D363",
+      "anio": 1994
+    },
+    {
+      "url": "https://especial.mineduc.cl/wp-content/uploads/sites/31/2026/08/Decreto-375-Escuelas_Hospitalarias.pdf",
+      "tipo_documento": "norma",
+      "formato": "pdf",
+      "titulo": "Decreto 375/1999",
+      "decreto": "D375",
+      "anio": 1999
+    },
+    {
+      "url": "https://especial.mineduc.cl/wp-content/uploads/sites/31/2016/08/201304231713050.ORDN610.pdf",
+      "tipo_documento": "norma",
+      "formato": "pdf",
+      "titulo": "Instructivo Ord. 610",
+      "decreto": "ORD610",
+      "anio": 2012
+    },
+    {
+      "url": "https://especial.mineduc.cl/wp-content/uploads/sites/31/2016/08/201304231730470.Escuelas_aulas_hospitalarias_2000.pdf",
+      "tipo_documento": "norma",
+      "formato": "pdf",
+      "titulo": "Ordinario 702/2000",
+      "decreto": "ORD702",
+      "anio": 2000
+    },
+    {
+      "url": "https://especial.mineduc.cl/wp-content/uploads/sites/31/2018/04/LEY-20370_12-SEP-2009.pdf",
+      "tipo_documento": "norma",
+      "formato": "pdf",
+      "titulo": "Ley 20.370 (General de Educación)",
+      "decreto": "L20370",
+      "anio": 2009
+    },
+    {
+      "url": "https://especial.mineduc.cl/wp-content/uploads/sites/31/2018/04/LEY-20422_10-FEB-2010.pdf",
+      "tipo_documento": "norma",
+      "formato": "pdf",
+      "titulo": "Ley 20.422 (inclusión de personas con discapacidad)",
+      "decreto": "L20422",
+      "anio": 2010
+    },
+    {
+      "url": "https://especial.mineduc.cl/wp-content/uploads/sites/31/2016/08/LEY-20609_24-JUL-2012.pdf",
+      "tipo_documento": "norma",
+      "formato": "pdf",
+      "titulo": "Ley 20.609 (antidiscriminación)",
+      "decreto": "L20609",
+      "anio": 2012
+    },
+    {
+      "url": "https://especial.mineduc.cl/wp-content/uploads/sites/31/2016/08/LEY-20845_08-JUN-2015.pdf",
+      "tipo_documento": "norma",
+      "formato": "pdf",
+      "titulo": "Ley 20.845 (inclusión escolar)",
+      "decreto": "L20845",
+      "anio": 2015
+    },
+    {
+      "url": "https://especial.mineduc.cl/wp-content/uploads/sites/31/2016/08/LEY-20903-Sist-Desarrollo-Profesional-Docente.pdf",
+      "tipo_documento": "norma",
+      "formato": "pdf",
+      "titulo": "Ley 20.903 (desarrollo profesional docente)",
+      "decreto": "L20903",
+      "anio": 2016
+    },
+    {
+      "url": "https://especial.mineduc.cl/wp-content/uploads/sites/31/2017/05/OrientacionesD83-Web-2017.pdf",
+      "tipo_documento": "orientacion",
+      "formato": "pdf",
+      "titulo": "Orientaciones D83 2017 (estrategias diversificadas de enseñanza, DUA)",
+      "anio": 2017
+    },
+    {
+      "url": "https://especial.mineduc.cl/wp-content/uploads/sites/31/2019/07/PREGUNTAS-FRECUENTES-D83-actualización-2019_-1.pdf",
+      "tipo_documento": "orientacion",
+      "formato": "pdf",
+      "titulo": "Preguntas frecuentes D83 2019",
+      "anio": 2019
+    },
+    {
+      "url": "https://especial.mineduc.cl/wp-content/uploads/sites/31/2025/02/ActualizaciOn_Orientaciones_implementaciOn_DecretoSupremo170-v2.pdf",
+      "tipo_documento": "orientacion",
+      "formato": "pdf",
+      "titulo": "Orientaciones D170 (actualización 2025)",
+      "anio": 2025
+    },
+    {
+      "url": "https://especial.mineduc.cl/wp-content/uploads/sites/31/2016/09/Orientaciones-PIE-2013-3.pdf",
+      "tipo_documento": "orientacion",
+      "formato": "pdf",
+      "titulo": "Orientaciones PIE 2013",
+      "anio": 2013
+    },
+    {
+      "url": "https://especial.mineduc.cl/wp-content/uploads/sites/31/2017/12/Manual-PIE.pdf",
+      "tipo_documento": "orientacion",
+      "formato": "pdf",
+      "titulo": "Manual PIE",
+      "anio": 2017
+    },
+    {
+      "url": "https://especial.mineduc.cl/wp-content/uploads/sites/31/2025/06/Cartilla_2-Trabajo_Colaborativo-0625.pdf",
+      "tipo_documento": "orientacion",
+      "formato": "pdf",
+      "titulo": "Cartilla 2 PIE: trabajo colaborativo",
+      "anio": 2025
+    },
+    {
+      "url": "https://especial.mineduc.cl/wp-content/uploads/sites/31/2025/11/Cartilla_4_Informe_EvaluacioOn_PsicopedagoOgica-2025.pdf",
+      "tipo_documento": "orientacion",
+      "formato": "pdf",
+      "titulo": "Cartilla 4 PIE: informe de evaluación psicopedagógica",
+      "anio": 2025
+    },
+    {
+      "url": "https://especial.mineduc.cl/wp-content/uploads/sites/31/2026/02/NUEVA-CARTILLA-5-Precisiones.pdf",
+      "tipo_documento": "orientacion",
+      "formato": "pdf",
+      "titulo": "Cartilla 5 PIE: precisiones",
+      "anio": 2026
+    },
+    {
+      "url": "https://especial.mineduc.cl/wp-content/uploads/sites/31/2026/04/CARTILLA_6_Consideraciones_Tecnicas_PIE.pdf",
+      "tipo_documento": "orientacion",
+      "formato": "pdf",
+      "titulo": "Cartilla 6 PIE: consideraciones técnicas",
+      "anio": 2026
+    },
+    {
+      "url": "https://especial.mineduc.cl/wp-content/uploads/sites/31/2016/09/201404021642530.ORIENTACIONES_RESPUESTAS_A_LA_DIVERSIDAD.pdf",
+      "tipo_documento": "orientacion",
+      "formato": "pdf",
+      "titulo": "Orientaciones: respuestas a la diversidad",
+      "anio": 2014
+    },
+    {
+      "url": "https://especial.mineduc.cl/wp-content/uploads/sites/31/2016/09/201505041515330.ORIENTACIONESPIEEDJOVENESYADULTOS.pdf",
+      "tipo_documento": "orientacion",
+      "formato": "pdf",
+      "titulo": "Orientaciones PIE educación de jóvenes y adultos",
+      "anio": 2015
+    },
+    {
+      "url": "https://especial.mineduc.cl/wp-content/uploads/sites/31/2023/08/ORIENTACIONES_ESCUELAS_MULTIGRADO.pdf",
+      "tipo_documento": "orientacion",
+      "formato": "pdf",
+      "titulo": "Orientaciones escuelas multigrado",
+      "anio": 2023
+    },
+    {
+      "url": "https://especial.mineduc.cl/wp-content/uploads/sites/31/2025/10/A.PREGUNTAS-FRECUENTES_ANTECEDENTES-GENERALES-DEL-PIE-.pdf",
+      "tipo_documento": "orientacion",
+      "formato": "pdf",
+      "titulo": "Preguntas frecuentes D170: antecedentes generales del PIE",
+      "anio": 2025
+    },
+    {
+      "url": "https://especial.mineduc.cl/wp-content/uploads/sites/31/2025/10/B.PREGUNTAS-FRECUENTES-SOBRE_EVALUACION-.pdf",
+      "tipo_documento": "orientacion",
+      "formato": "pdf",
+      "titulo": "Preguntas frecuentes D170: evaluación diagnóstica integral",
+      "anio": 2025
+    },
+    {
+      "url": "https://especial.mineduc.cl/wp-content/uploads/sites/31/2025/10/C.PREGUNTAS-FRECUENTES-FU_REGISTRO_PIE-.pdf",
+      "tipo_documento": "orientacion",
+      "formato": "pdf",
+      "titulo": "Preguntas frecuentes D170: formularios únicos y registro PIE",
+      "anio": 2025
+    },
+    {
+      "url": "https://especial.mineduc.cl/wp-content/uploads/sites/31/2025/07/Orientaciones-PAEC.pdf",
+      "tipo_documento": "orientacion",
+      "formato": "pdf",
+      "titulo": "Orientaciones PAEC (Ley TEA 21.545)",
+      "anio": 2025
+    },
+    {
+      "url": "https://especial.mineduc.cl/wp-content/uploads/sites/31/2016/08/201404031020530.ManualTrastornoEspectroAustista.pdf",
+      "tipo_documento": "orientacion",
+      "formato": "pdf",
+      "titulo": "Manual de apoyo a docentes: trastornos del espectro autista",
+      "anio": 2014
+    },
+    {
+      "url": "https://especial.mineduc.cl/wp-content/uploads/sites/31/2016/08/201304231527430.ManualLeyN20422.pdf",
+      "tipo_documento": "orientacion",
+      "formato": "pdf",
+      "titulo": "Manual de la Ley 20.422",
+      "anio": 2013
+    },
+    {
+      "url": "https://www.curriculumnacional.cl/614/articles-263998_archivo_01.pdf",
+      "tipo_documento": "orientacion",
+      "formato": "pdf",
+      "titulo": "Fundamentos del Decreto 67 (Mineduc, 2017)",
+      "anio": 2017
+    },
+    {
+      "url": "https://www.curriculumnacional.cl/614/articles-133996_archivo_01.pdf",
+      "tipo_documento": "orientacion",
+      "formato": "pdf",
+      "titulo": "Orientaciones para la elaboración del Reglamento de Evaluación (Decreto 67)",
+      "anio": 2018
+    }
+  ]
+}
