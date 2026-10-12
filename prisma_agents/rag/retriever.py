@@ -42,6 +42,13 @@ def palabras_clave(consulta: str) -> list[str]:
     return vistas
 
 
+def _ruido_eximicion(fila: dict) -> bool:
+    """Orientaciones que describen la eximición como práctica (encuestas, usos indeseados) no deben llegar a los agentes:
+    en la comparación con/sin RAG del 2026-10-11 el generador repitió «eximiéndolo» en una rúbrica y el crítico la bloqueó (C4).
+    Las NORMAS no se filtran: el Art. 5 del D67 («no podrán ser eximidos… deberán implementar las diversificaciones») sí debe llegar."""
+    return fila["tipo_documento"] == "orientacion" and re.search(r"exim", fila["texto"], re.I) is not None
+
+
 def fusionar_rrf(listas: list[list[dict]], k: int = 60) -> list[dict]:
     puntajes: dict[int, float] = {}
     filas: dict[int, dict] = {}
@@ -71,11 +78,14 @@ def formatear(resultados: list[dict], encabezado: str) -> str:
     return f'{encabezado}\n<documento_usuario tipo="normativa_referencia">\n{cuerpo}\n</documento_usuario>'
 
 
-async def _buscar(conn, emb, consulta: str, tipos: list[str], filtro: dict | None, k: int) -> list[dict]:
+async def _buscar(conn, emb, consulta: str, tipos: list[str], filtro: dict | None, k: int, descartar=None) -> list[dict]:
     vector = await emb.embeber_consulta(consulta)
     por_vector = await store.buscar_vector(conn, vector, tipos, filtro, _CANDIDATOS)
     por_texto = await store.buscar_texto(conn, palabras_clave(consulta), tipos, filtro, _CANDIDATOS)
-    return fusionar_rrf([por_vector, por_texto])[:k]
+    fusion = fusionar_rrf([por_vector, por_texto])
+    if descartar is not None:
+        fusion = [f for f in fusion if not descartar(f)]
+    return fusion[:k]
 
 
 async def _ejecutar(punto: str, asignatura: str, curso: str, diagnostico: str) -> str:
@@ -84,10 +94,15 @@ async def _ejecutar(punto: str, asignatura: str, curso: str, diagnostico: str) -
     conn = await store.conectar(os.environ["RAG_DATABASE_URL"])
     try:
         consulta = construir_consulta(punto, asignatura, curso, nee)
-        resultados = await _buscar(conn, emb, consulta, ["norma", "orientacion"], None, 4 if punto == "adaptador" else 5)
-        if punto == "adaptador" and asignatura and curso:
-            consulta_oa = construir_consulta("curriculo", asignatura, curso, [])
-            resultados += await _buscar(conn, emb, consulta_oa, ["curriculo"], {"asignatura": asignatura, "curso": curso}, 2)
+        if punto == "evaluacion":
+            # La rúbrica se apoya en el D67: sus artículos primero, y luego orientaciones (sin el ruido sobre eximición).
+            resultados = await _buscar(conn, emb, consulta, ["norma"], {"decreto": "D67"}, 3)
+            resultados += await _buscar(conn, emb, consulta, ["orientacion"], None, 2, _ruido_eximicion)
+        else:
+            resultados = await _buscar(conn, emb, consulta, ["norma", "orientacion"], None, 4, _ruido_eximicion)
+            if asignatura and curso:
+                consulta_oa = construir_consulta("curriculo", asignatura, curso, [])
+                resultados += await _buscar(conn, emb, consulta_oa, ["curriculo"], {"asignatura": asignatura, "curso": curso}, 2)
     finally:
         await _cerrar(conn)
     return formatear(ajustar_presupuesto(resultados), _ENCABEZADO)

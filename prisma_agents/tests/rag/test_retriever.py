@@ -96,7 +96,7 @@ async def test_de_punta_a_punta_con_base_real(conn, monkeypatch):
         ("curriculo", "Matemática 3.º básico", "3.º básico · Matemática · OA 01"): "Contar números del 0 al 1 000.",
     }
     for n, ((tipo, titulo, ruta), texto) in enumerate(textos.items()):
-        meta = {"asignatura": "matematica", "curso": "3basico"} if tipo == "curriculo" else {}
+        meta = {"asignatura": "matematica", "curso": "3basico"} if tipo == "curriculo" else ({"decreto": "D67"} if titulo.startswith("Decreto 67") else {})
         v = (await emb.embeber_documentos([texto]))[0]
         await store.reemplazar_documento(
             conn, {"fuente_url": f"https://x/{n}", "tipo_documento": tipo, "titulo": titulo, "sha256": str(n), "anio": 2020, "vigente": True},
@@ -174,3 +174,66 @@ def test_el_cliente_de_embeddings_real_lleva_un_tiempo_maximo(monkeypatch):
     monkeypatch.setattr("google.genai.Client", ClienteFalso)
     GeminiEmbedder(timeout_ms=8000)._cliente()
     assert capturado["http_options"].timeout == 8000
+
+
+# ── Ajuste tras la comparación con/sin RAG: la rúbrica recibe los artículos del D67 y no el ruido sobre eximición ─────────
+def test_el_ruido_sobre_eximicion_solo_se_descarta_en_las_orientaciones():
+    orientacion = {"tipo_documento": "orientacion", "texto": "El 10 % aborda la eximición de algunas materias"}
+    norma = {"tipo_documento": "norma", "texto": "Los alumnos no podrán ser eximidos de ninguna asignatura"}
+    assert retriever._ruido_eximicion(orientacion) is True
+    assert retriever._ruido_eximicion(norma) is False                      # el Art. 5 del D67 se conserva
+    assert retriever._ruido_eximicion({"tipo_documento": "orientacion", "texto": "evaluación diversificada"}) is False
+
+
+async def _sembrar_para_evaluacion(conn, emb):
+    filas = [
+        ("norma", "Decreto 67/2018", "Art. 5", {"decreto": "D67"},
+         "Los alumnos no podrán ser eximidos de ninguna asignatura; los establecimientos deberán implementar las diversificaciones pertinentes de la evaluación para estudiantes con necesidades educativas especiales."),
+        ("norma", "Decreto 83/2015", "Art. 5 (parte 15)", {"decreto": "D83"},
+         "Evaluación diversificada para estudiantes con necesidades educativas especiales calificación promoción diferenciada."),
+        ("orientacion", "Fundamentos del Decreto 67", "pp. 96–97", {},
+         "Evaluación diferenciada calificación promoción necesidades educativas especiales: la eximición suprimirá usos indeseados de esta medida."),
+        ("orientacion", "Orientaciones del Reglamento de Evaluación", "pp. 7–8", {},
+         "Evaluación diferenciada, calificación y promoción de estudiantes con necesidades educativas especiales: el reglamento define criterios."),
+    ]
+    for n, (tipo, titulo, ruta, meta, texto) in enumerate(filas):
+        v = (await emb.embeber_documentos([texto]))[0]
+        await store.reemplazar_documento(
+            conn, {"fuente_url": f"https://x/ev{n}", "tipo_documento": tipo, "titulo": titulo, "sha256": str(n), "anio": 2020, "vigente": True},
+            [{"orden": 0, "ruta": ruta, "texto": texto, "metadata": meta, "embedding": v, "embedding_model": "fake", "embedding_version": "1"}],
+        )
+
+
+@pytest.mark.asyncio
+async def test_la_rubrica_recibe_el_d67_y_no_las_orientaciones_sobre_eximicion(conn, monkeypatch):
+    emb = FakeEmbedder()
+    await _sembrar_para_evaluacion(conn, emb)
+
+    async def conectar_prueba(url, timeout=5.0):
+        return _ConexionPrestada(conn)
+
+    monkeypatch.setenv("RAG_DATABASE_URL", "postgresql://x")
+    monkeypatch.setattr(retriever.store, "conectar", conectar_prueba)
+    monkeypatch.setattr(retriever, "_embedder", lambda: emb)
+
+    texto = await retriever.normativa_para_evaluacion("matematica", "3basico", "TEA")
+    assert "[Decreto 67/2018 · Art. 5]" in texto                           # el artículo del D67 va siempre
+    assert "[Orientaciones del Reglamento de Evaluación · pp. 7–8]" in texto
+    assert "Fundamentos del Decreto 67" not in texto                       # el fragmento sobre eximición queda fuera
+    assert "Decreto 83/2015" not in texto                                  # a la rúbrica le toca el D67
+
+
+@pytest.mark.asyncio
+async def test_el_adaptador_tampoco_recibe_orientaciones_sobre_eximicion(conn, monkeypatch):
+    emb = FakeEmbedder()
+    await _sembrar_para_evaluacion(conn, emb)
+
+    async def conectar_prueba(url, timeout=5.0):
+        return _ConexionPrestada(conn)
+
+    monkeypatch.setenv("RAG_DATABASE_URL", "postgresql://x")
+    monkeypatch.setattr(retriever.store, "conectar", conectar_prueba)
+    monkeypatch.setattr(retriever, "_embedder", lambda: emb)
+
+    texto = await retriever.normativa_para_adaptador("", "", "TEA")
+    assert "Fundamentos del Decreto 67" not in texto

@@ -23,7 +23,7 @@ _NEE = {
 
 _FRASE = {
     "adaptador": "adecuaciones curriculares diversificación de la enseñanza diseño universal de aprendizaje PACI",
-    "evaluacion": "evaluación diferenciada calificación promoción estudiantes con necesidades educativas especiales",
+    "evaluacion": "diversificaciones pertinentes de la evaluación y adecuaciones curriculares para estudiantes con necesidades educativas especiales, calificación y promoción",
     "curriculo": "objetivos de aprendizaje",
 }
 

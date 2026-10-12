@@ -19,3 +19,9 @@ def test_consulta_sin_asignatura_ni_curso_ni_nee_sigue_siendo_valida():
     c = construir_consulta("evaluacion", "", "", [])
     assert "evaluación" in c and c.strip()
     assert "None" not in c
+
+
+def test_la_consulta_de_evaluacion_usa_el_lenguaje_del_art_5_del_d67():
+    """Con la frase anterior el Art. 5 no entraba en los 3 primeros del D67; estas palabras son las de su texto."""
+    c = construir_consulta("evaluacion", "matematica", "3basico", ["TEA"])
+    assert "diversificaciones pertinentes" in c and "necesidades educativas especiales" in c
